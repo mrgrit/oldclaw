@@ -33,7 +33,6 @@ SERVICES = [
 def wait_for_health(base_url: str, health_path: str, timeout_s: int = 20) -> dict:
     started = time.time()
     last_error = None
-
     while time.time() - started < timeout_s:
         try:
             response = requests.get(f"{base_url}{health_path}", timeout=3)
@@ -42,7 +41,6 @@ def wait_for_health(base_url: str, health_path: str, timeout_s: int = 20) -> dic
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             time.sleep(1)
-
     raise RuntimeError(f"health check failed for {base_url}{health_path}: {last_error}")
 
 
@@ -54,7 +52,6 @@ def invoke_runtime(base_url: str, payload: dict) -> dict:
 
 def main() -> int:
     processes: list[subprocess.Popen] = []
-
     try:
         for service in SERVICES:
             process = subprocess.Popen(
@@ -73,11 +70,11 @@ def main() -> int:
                 text=True,
             )
             processes.append(process)
-
         for service in SERVICES:
             base_url = f"http://127.0.0.1:{service['port']}"
             health = wait_for_health(base_url, service["health_path"])
             print(f"{service['name'].upper()}_HEALTH:", health)
+            time.sleep(0.5)
 
         for service in SERVICES:
             base_url = f"http://127.0.0.1:{service['port']}"
@@ -85,12 +82,10 @@ def main() -> int:
             print(f"{service['name'].upper()}_RUNTIME_STATUS:", result["status"])
             print(f"{service['name'].upper()}_RUNTIME_STDOUT:", result["result"]["stdout"])
             print(f"{service['name'].upper()}_RUNTIME_EXIT_CODE:", result["result"]["exit_code"])
-
         return 0
     finally:
         for process in processes:
             process.terminate()
-
         for process in processes:
             try:
                 process.wait(timeout=5)
