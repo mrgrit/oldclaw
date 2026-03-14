@@ -29,12 +29,4 @@ async def list_capabilities():
 # ---------- A2A script execution (mock) ----------
 @app.post("/run")
 async def run_script(command: str, timeout: int = 60):
-    try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
-        return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-        }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Command timed out")
+    raise HTTPException(status_code=501, detail="run_script not implemented in M0; placeholder only")

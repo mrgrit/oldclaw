@@ -1,22 +1,25 @@
-# OldClaw M0 Design Baseline
+# docs/m0/oldclaw-m0-design-baseline.md
 
-## 목표
+# OldClaw M0 Design Baseline (Reference Implementation)
+
+## 1. 목표
 - **OldClaw**는 **pi runtime** 위에 구축되는 **Control‑Plane Orchestration Platform**이다.
-- Asset‑first, Evidence‑first 원칙을 고수하며, **Tool → Skill → Playbook** 의 3‑계층 흐름을 강제한다.
-- 서비스는 **Manager API, Master Service, SubAgent Runtime, Scheduler Worker, Watch Worker** 로 구분한다.
+- 핵심 원칙: **Asset‑first**, **Evidence‑first**, **Tool < Skill < Playbook** 계층화.
+- 서비스는 **Manager API**, **Master Service**, **SubAgent Runtime**, **Scheduler Worker**, **Watch Worker** 로 명확히 분리한다.
 
-## 핵심 설계 결정 (M0 고정)
-| 영역 | 결정 내용 | 이유 |
-|------|-----------|------|
-| 데이터 모델 | `assets`, `projects`, `job_runs` 등 핵심 테이블을 PK=UUID, `created_at/updated_at` 기본 제공 | 일관된 식별자와 시간 추적 보장 |
-| 서비스 경계 | Manager‑API: 외부 API 제공<br>Master‑Service: 검토·리플랜·Escalation 로직<br>SubAgent‑Runtime: A2A 실행 엔진, Capability 조회<br>Scheduler‑Worker / Watch‑Worker: 백그라운드 잡 스케줄링 및 모니터링 | 책임 분리, 확장성 확보 |
-| Registry | `tools`, `skills`, `playbooks` 를 별도 스키마로 관리, versioned ID (`<name>:<ver>`) 사용 | 재사용·버전 관리 용이 |
-| 플로우 | **Tool** 은 원시 명령/시스템 콜, **Skill** 은 Tool 조합 + 검증, **Playbook** 은 Skill 순차 실행 정의 | 단계적 검증, 정책 적용 가능 |
+## 2. 핵심 설계 결정 (M0 고정)
+| 영역 | 결정 사항 | 이유 |
+|------|------------|------|
+| 데이터 모델 | `assets`, `projects`, `job_runs`, `evidence` 등 핵심 테이블을 **UUID PK**, `created_at/updated_at` 타임스탬프 기본 제공 | 일관된 식별자와 추적 가능성 보장 |
+| Tool/Skill/Playbook 경계 | Tool은 **저수준 시스템 호출**만 수행; Skill은 Tool 조합 + 검증; Playbook은 Skill 순차 실행 및 정책 바인딩 | 책임 분리, 검증 가능, 정책 적용 용이 |
+| Service 책임 | Manager → 외부 API 제공, Project/Asset CRUD 및 Playbook 트리거<br>Master → Review, Re‑plan, Escalation 로직<br>SubAgent → Health, Capability 열람, A2A 스크립트 실행<br>Scheduler → `schedules` 기반 JobRun 생성<br>Watch → `watch_jobs` 모니터링 및 이벤트 처리 | 책임 명확화, 독립 배포 가능 |
+| 모델 프로파일 | `packages/pi_adapter/model_profiles` 에 `manager`, `master`, `subagent` 각각의 모델·temperature 정의 | 향후 M1에서 모델 교체 용이 |
 
-## 다음 마일스톤 (M1) 에 위임된 항목
-- 복잡한 정책 엔진 구현
-- 고도화된 검증/리포팅 로직
-- 실제 pi runtime 연동 (모델 프로파일, 세션 관리)
+## 3. M1 로 넘기는 항목 (보강 후 이관)
+- 정책 엔진 상세 구현 (policy_engine 패키지)
+- 고도화된 검증/리포팅 파이프라인
+- 실제 pi SDK 연동 및 세션 관리
+- 복합 인덱스 및 성능 튜닝
 
 ---
-*본 문서는 M0 단계에서 확정된 설계 사항을 기록합니다. 이후 변경 시 "임의 적용"으로 명시합니다.*
+*본 문서는 현재 M0 단계에서 확정된 설계와, 다음 마일스톤(M1)으로 이관될 항목을 구분해 기록합니다.*

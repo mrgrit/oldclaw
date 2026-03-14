@@ -1,5 +1,5 @@
 -- 0002_registry.sql
--- Registry tables for Tool, Skill, Playbook and their relationships
+-- Registry schema for Tools, Skills and Playbooks (M0)
 
 CREATE TABLE tools (
     id TEXT PRIMARY KEY,
@@ -13,7 +13,8 @@ CREATE TABLE tools (
     policy_tags JSONB,
     enabled BOOLEAN DEFAULT true,
     metadata JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT uq_tools_name_version UNIQUE (name, version)
 );
 
 CREATE TABLE skills (
@@ -32,12 +33,13 @@ CREATE TABLE skills (
     evidence_expectations JSONB,
     enabled BOOLEAN DEFAULT true,
     metadata JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT uq_skills_name_version UNIQUE (name, version)
 );
 
 CREATE TABLE skill_tools (
-    skill_id TEXT REFERENCES skills(id) ON DELETE CASCADE,
-    tool_id TEXT REFERENCES tools(id) ON DELETE CASCADE,
+    skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    tool_id TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
     usage_mode TEXT,
     order_hint INTEGER,
     PRIMARY KEY (skill_id, tool_id)
@@ -49,7 +51,7 @@ CREATE TABLE playbooks (
     name TEXT NOT NULL,
     category TEXT,
     description TEXT,
-    execution_mode TEXT,
+    execution_mode TEXT CHECK (execution_mode IN ('one_shot','batch','continuous')),
     default_risk_level TEXT,
     input_schema_ref TEXT,
     output_schema_ref TEXT,
@@ -60,12 +62,13 @@ CREATE TABLE playbooks (
     policy_bindings JSONB,
     enabled BOOLEAN DEFAULT true,
     metadata JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT uq_playbooks_name_version UNIQUE (name, version)
 );
 
 CREATE TABLE playbook_steps (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    playbook_id TEXT REFERENCES playbooks(id) ON DELETE CASCADE,
+    playbook_id TEXT NOT NULL REFERENCES playbooks(id) ON DELETE CASCADE,
     step_order INTEGER NOT NULL,
     step_type TEXT NOT NULL,
     ref_id TEXT,
@@ -79,7 +82,7 @@ CREATE TABLE playbook_steps (
 
 CREATE TABLE playbook_bindings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    playbook_id TEXT REFERENCES playbooks(id) ON DELETE CASCADE,
+    playbook_id TEXT NOT NULL REFERENCES playbooks(id) ON DELETE CASCADE,
     binding_type TEXT NOT NULL,
     binding_ref TEXT NOT NULL,
     metadata JSONB,

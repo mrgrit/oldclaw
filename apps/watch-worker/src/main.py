@@ -12,7 +12,7 @@ async def health_check():
 
 def process_watches():
     # TODO: query DB for pending watch jobs and handle events
-    print("Processing watch jobs… (placeholder)")
+    raise NotImplementedError("process_watches not implemented in M0 – DB integration pending")
 
 def main():
     while True:

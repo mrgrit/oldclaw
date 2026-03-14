@@ -27,8 +27,7 @@ class AssetCreateReq(BaseModel):
 # ---------- Project endpoints ----------
 @app.post("/projects")
 async def create_project(req: ProjectCreateReq):
-    # TODO: integrate with core DB service
-    return {"project_id": "<generated-uuid>", "status": "created"}
+    raise HTTPException(status_code=501, detail="create_project not implemented yet")
 
 @app.get("/projects/{project_id}")
 async def get_project(project_id: str):
@@ -37,13 +36,12 @@ async def get_project(project_id: str):
 
 @app.post("/projects/{project_id}/execute")
 async def execute_project(project_id: str, mode: str = "one_shot"):
-    # Stub for triggering playbook execution
-    return {"run_id": "<run-uuid>", "status": "queued"}
+    raise HTTPException(status_code=501, detail="execute_project not implemented yet")
 
 # ---------- Asset endpoints ----------
 @app.post("/assets")
 async def create_asset(req: AssetCreateReq):
-    return {"asset_id": "<generated-uuid>", "status": "created"}
+    raise HTTPException(status_code=501, detail="create_asset not implemented yet")
 
 @app.get("/assets/{asset_id}")
 async def get_asset(asset_id: str):
@@ -56,7 +54,7 @@ async def resolve_asset(asset_id: str):
 # ---------- Playbook execution ----------
 @app.post("/playbooks/run")
 async def run_playbook(playbook_id: str, input: Any = None):
-    return {"run_id": "<run-uuid>", "status": "started"}
+    raise HTTPException(status_code=501, detail="run_playbook not implemented yet")
 
 # ---------- Evidence listing ----------
 @app.get("/projects/{project_id}/evidence")

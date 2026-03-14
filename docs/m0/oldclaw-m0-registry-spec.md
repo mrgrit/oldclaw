@@ -1,70 +1,36 @@
-# OldClaw M0 Registry Specification
+# docs/m0/oldclaw-m0-registry-spec.md
 
-## 개요
-`registry` 는 **Tool → Skill → Playbook** 의 3‑계층 메타데이터를 정의한다. 각각은 versioned ID(`name:ver`) 로 식별되며, 입력/출력 스키마와 정책 힌트를 포함한다.
+# Registry Specification (M0)
 
-## 경계 정의
-| 레이어 | 책임 | 금지사항 |
-|--------|------|----------|
-| **Tool** | 시스템 명령, API 호출, 파일 I/O 등 저수준 동작 제공 | 비즈니스 로직, 상태 저장, 검증 로직 포함 금지 |
-| **Skill** | 하나 이상의 Tool 조합, 입력 검증, 출력 가공, 증거(evidence) 기대 정의 | 외부 서비스와 직접 통신(예: DB 쓰기) 금지, 오직 Tool 호출만 허용 |
-| **Playbook** | Skill 시퀀스 정의, 흐름 제어(조건/리트라이), 정책 바인딩 | 직접 Tool 호출, 데이터베이스 직접 조작 금지 |
+## 1. 개념 정의
+- **Tool** – 저수준 시스템/SDK 호출. 반드시 **단일 원자 동작**만 수행한다. (예: `run_command`, `read_file`)
+- **Skill** – 하나 이상의 Tool 조합 + 입력 검증 + 증거(evidence) 기대 정의. **비즈니스 로직**은 여기서 허용되지 않는다.
+- **Playbook** – Skill 순차 실행, 흐름 제어(조건, 리트라이, 실패 정책), 정책 바인딩. **Tool** 직접 호출 금지.
 
-## 필수 메타데이터 (공통)
-- `id` : `name:version` 형식 문자열 (예: `run_command:1.0`)
-- `name` : 인간 읽기 가능한 식별자
-- `version` : SemVer 문자열
-- `description` : 기능 요약
-- `input_schema_ref`/`output_schema_ref` : `schemas/registry/...` 경로 참조
-- `enabled` : 비활성화시 자동 제외
-- `metadata` : 자유 JSON, 확장용
+## 2. 경계 및 금지사항
+| 레이어 | 허용 행동 | 금지 행동 |
+|--------|----------|-----------|
+| **Tool** | 시스템 명령, 파일 I/O, 서비스 API 호출 | DB 쓰기, 비즈니스 의사결정, 복합 트랜잭션 |
+| **Skill** | Tool 호출, 입력 검증, 증거 메타데이터 기록 | 직접 DB 조작, 외부 서비스와 직접 통신 (Tool을 통해서만) |
+| **Playbook** | Skill 순서 정의, 조건/리트라이, 정책 바인딩 | Tool 직접 호출, 직렬화되지 않은 상태 유지 |
 
-## Tool Spec 예시 (run_command)
-```json
-{
-  "id": "run_command:1.0",
-  "name": "run_command",
-  "version": "1.0",
-  "description": "Execute a shell command on the target host",
-  "runtime_type": "local",
-  "input_schema_ref": "schemas/registry/tools/run_command.input.json",
-  "output_schema_ref": "schemas/registry/tools/run_command.output.json",
-  "policy_tags": ["security", "operations"],
-  "enabled": true
-}
-```
+## 3. 메타데이터 필수 항목
+- `id` : `<name>:<semver>` (예: `run_command:1.0`)
+- `name`, `version`, `description`
+- `input_schema_ref` / `output_schema_ref` – `schemas/registry/*` 경로
+- **Tool** : `runtime_type`, `policy_tags`
+- **Skill** : `required_tools` (list), `optional_tools` (list), `default_validation`, `evidence_expectations`
+- **Playbook** : `required_asset_roles`, `execution_mode` (one_shot|batch|continuous), `failure_policy`, `policy_bindings`
 
-## Skill Spec 예시 (collect_web_latency_facts)
-```json
-{
-  "id": "collect_web_latency_facts:1.0",
-  "name": "collect_web_latency_facts",
-  "version": "1.0",
-  "category": "observability",
-  "description": "Collect latency metrics for a web endpoint using run_command",
-  "required_tools": ["run_command"],
-  "input_schema_ref": "schemas/registry/skills/collect_web_latency_facts.input.json",
-  "output_schema_ref": "schemas/registry/skills/collect_web_latency_facts.output.json",
-  "default_validation": {"type": "object", "required": ["latency_ms"]},
-  "evidence_expectations": {"type": "object", "properties": {"latency_ms": {"type": "number"}}},
-  "enabled": true
-}
-```
+## 4. 설계 결정 (M0 고정)
+- Tool 은 **local** 혹은 **remote** (runtime_type) 으로 구분한다.
+- Skill 은 **required_tools** 로 최소 의존성을 선언하고, `optional_tools` 로 유연성을 제공한다.
+- Playbook 은 **execution_mode** 로 실행 형태를 지정하고, `failure_policy` 로 abort/continue 전략을 정의한다.
 
-## Playbook Spec 예시 (diagnose_web_latency)
-```json
-{
-  "id": "diagnose_web_latency:1.0",
-  "name": "diagnose_web_latency",
-  "version": "1.0",
-  "category": "observability",
-  "description": "Run a series of skills to diagnose web latency issues",
-  "execution_mode": "one_shot",
-  "required_asset_roles": ["web_server"],
-  "failure_policy": {"type": "enum", "values": ["abort", "continue"]},
-  "policy_bindings": [{"policy": "latency_threshold", "params": {"max_ms": 200}}]
-}
-```
+## 5. M1 로 넘기는 항목
+- Tool 의 **policy_tags** 구체화 및 정책 엔진 연동
+- Skill 의 **validation_hint** 상세 구현
+- Playbook 의 **policy_bindings** 복합 정책 표현
 
 ---
-*임의 적용*: 실제 스키마 파일 경로와 일부 정책 정의는 추후 M1 단계에서 보강될 수 있습니다.*
+*임의 적용*: 일부 필드(예: `policy_tags`) 는 현재 placeholder이며, M1 에서 구체화 예정.*

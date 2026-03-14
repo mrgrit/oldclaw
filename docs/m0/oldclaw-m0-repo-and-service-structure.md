@@ -1,39 +1,34 @@
-# OldClaw M0 Repository & Service Structure
+# docs/m0/oldclaw-m0-repo-and-service-structure.md
 
-## Repository Layout
+# Repository & Service Structure (M0 Reference)
+
 ```
-apps/
-  manager-api/      # FastAPI 기반 외부 API 엔드포인트
-  master-service/   # 검토·리플랜·Escalation 비즈니스 로직
-  scheduler-worker/ # 백그라운드 스케줄러 워커
-  subagent-runtime/ # A2A 실행 엔진, Capability 제공
-  watch-worker/     # 모니터링/Watch 엔진
-
-docs/m0/            # M0 설계 문서 (이 문서)
-
-migrations/         # Flyway‑like SQL 마이그레이션 파일들
-schemas/            # JSON Schema 기반 API 계약
-seed/               # 초기 데이터 (tools, skills, playbooks, policies)
-packages/           # 공유 라이브러리 및 서비스 별 패키지
-  pi_adapter/       # pi runtime 과의 어댑터 계층 (경계 정의)
+oldclaw/
+├─ apps/
+│   ├─ manager-api/      # FastAPI entrypoint, REST façade
+│   ├─ master-service/   # Review / Re‑plan / Escalation service
+│   ├─ subagent-runtime/ # Lightweight HTTP API for health, capabilities, A2A run
+│   ├─ scheduler-worker/ # Background poller for `schedules`
+│   └─ watch-worker/     # Background processor for `watch_jobs`
+├─ docs/m0/               # M0 설계 문서 (본 디렉터리)
+├─ migrations/            # Flyway‑like SQL 마이그레이션 (초기 스키마)
+├─ packages/
+│   └─ pi_adapter/        # pi runtime 과의 어댑터 계층 (runtime, tools, sessions …)
+├─ schemas/                # JSON‑Schema 기반 API 계약 및 Registry 스키마
+├─ seed/                   # 초기 registry 데이터 (Tool, Skill, Playbook, Policy)
+├─ tests/                  # 테스트 스위트 (현재 placeholder)
+└─ README.md
 ```
 
-## 서비스 책임
-- **Manager API**: HTTP/REST 인터페이스 제공, 인증·권한 검사, 프로젝트/에셋 CRUD, Playbook 실행 트리거.
-- **Master Service**: 프로젝트 검토, 재계획, 에스컬레이션, 정책 적용 로직.
-- **SubAgent Runtime**: 실제 명령 실행, Tool Bridge 제공, A2A 메시징 수신·전송.
-- **Scheduler Worker**: `schedules` 테이블 기반 주기적인 JobRun 생성, 재시도 로직.
-- **Watch Worker**: `watch_jobs` 와 `watch_events` 를 활용해 상태 변화를 감시하고 알림.
+## 서비스 간 의존 방향
+- **Manager API** → `packages/core`, `packages/pi_adapter` (ToolBridge 사용) → DB (via core services)
+- **Master Service** → `packages/policy_engine` (향후) → DB
+- **SubAgent Runtime** → `packages/pi_adapter/runtime` (세션 관리) → pi runtime (외부) – **읽기 전용**
+- **Scheduler / Watch Workers** → DB (읽기) → `packages/core` (JobRun / WatchJob 생성) → `apps/manager-api` (엔드포인트 트리거) 
 
-## 패키지 의존 방향
-```
-manager-api  -->  core, pi_adapter, shared
-master-service --> core, policy_engine, shared
-subagent-runtime --> pi_adapter, a2a_protocol, shared
-scheduler-service --> core, shared
-watch-service --> core, shared
-```
-*하위 패키지는 상위 패키지(예: `core`)에만 직접 의존하고, 서로 순환 의존을 피한다.*
+**의존성 규칙**
+- 하위 서비스는 상위 서비스에 직접 의존하지 않는다. 모두 DB와 공통 `core` 패키지를 통해 데이터 교환.
+- `pi_adapter` 는 **외부** pi 엔진에만 의존하고, OldClaw 내부 로직에 절대 침투하지 않는다.
 
 ---
-*임의 적용*: 일부 패키지 의존도는 차후 M1 단계에서 조정될 수 있습니다.*
+*임의 적용*: 일부 디렉터리 구조는 추후 M1 단계에서 세부 패키지로 재구성될 수 있습니다.*

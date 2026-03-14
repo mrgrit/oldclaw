@@ -12,7 +12,7 @@ async def health_check():
 
 def poll_schedules():
     # TODO: query DB for due schedules and create JobRun entries
-    print("Polling schedules… (placeholder)")
+    raise NotImplementedError("poll_schedules not implemented in M0 – DB integration pending")
 
 def main():
     while True:
