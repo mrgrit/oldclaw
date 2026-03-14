@@ -1,53 +1,263 @@
-# Registry Specification (M0)
+# OldClaw M0 Registry Specification
 
-The registry is the **single source of truth** for all executable primitives in OldClaw. It defines three hierarchical layers – **Tool**, **Skill**, and **Playbook** – each with strict boundaries to guarantee composability, auditability, and policy enforcement.
+## 1. 문서 목적
 
-## 1. 개념 정의
-- **Tool** – 가장 낮은 수준의 시스템/SDK 호출. 반드시 **단일 원자 동작**만 수행한다. 예: `run_command`, `read_file`, `fetch_log`.
-- **Skill** – 하나 이상의 Tool을 조합하고 입력을 검증하며 **Evidence** 를 생성한다. 비즈니스 로직은 허용되지 않으며, 결과는 반드시 `evidence_expectations` 에 정의된 형식이어야 한다.
-- **Playbook** – Skill을 순차·조건부로 연결하고, 흐름 제어(조건, 리트라이, 실패 정책)와 정책 바인딩을 정의한다. Tool을 직접 호출하는 것은 금지된다.
-
-## 2. 경계 및 금지사항
-| 레이어 | 허용 행동 | 금지 행동 |
-|--------|----------|-----------|
-| **Tool** | 시스템 명령, 파일 I/O, 외부 API 호출 (단일 요청) | DB 쓰기, 복합 트랜잭션, 비즈니스 의사결정 |
-| **Skill** | Tool 호출, 입력 검증, 증거 메타데이터 기록 | 직접 DB 조작, 외부 서비스와 직접 통신 (Tool을 통해서만) |
-| **Playbook** | Skill 순서 정의, 조건/리트라이, 정책 바인딩 | Tool 직접 호출, 비정형 상태 유지 |
-
-## 3. 메타데이터 필수 항목 (공통)
-- `id` : `<name>:<semver>` (예: `run_command:1.0`)
-- `name` : 사람 친화적 식별자
-- `version` : SemVer 문자열
-- `description` : 기능 요약
-- `input_schema_ref` / `output_schema_ref` – `schemas/registry/*` 에 위치한 JSON‑Schema 경로
-- `enabled` : 비활성화 시 자동 제외
-- `metadata` : 자유 JSON, 확장용
-
-### Tool 전용
-- `runtime_type` : `local` | `remote` (예: pi‑model) 
-- `policy_tags` : 정책 엔진이 활용할 태그 리스트 (예: `security`, `operations`)
-
-### Skill 전용
-- `required_tools` : 최소 의존 Tool 리스트 (예: `["run_command"]`)
-- `optional_tools` : 선택적 Tool 리스트
-- `default_validation` : 입력 검증 스키마 (JSON‑Schema 혹은 OpenAPI 조각)
-- `evidence_expectations` : 생성될 Evidence 의 구조와 필수 필드
-
-### Playbook 전용
-- `required_asset_roles` : Playbook 실행에 필요한 Asset 역할 리스트
-- `execution_mode` : `one_shot` | `batch` | `continuous`
-- `failure_policy` : `abort` | `continue` | 커스텀 재시도 정책
-- `policy_bindings` : 적용할 정책/제한 목록 및 파라미터
-
-## 4. 설계 결정 (M0 고정)
-- **Tool** 은 `runtime_type` 으로 로컬(서버 내부) 혹은 원격(pi) 실행을 구분한다.
-- **Skill** 은 최소 `required_tools` 로 의존성을 선언하고, `optional_tools` 로 유연성을 제공한다. 모든 Skill 은 입력/출력을 **JSON** 형태로 표준화한다.
-- **Playbook** 은 `execution_mode` 로 실행 형태를 지정하고, `failure_policy` 로 오류 시 동작을 명시한다. 정책 바인딩은 `policy_bindings` 에 JSON 객체 형태로 기술한다.
-
-## 5. M1 로 넘기는 항목
-- **Tool** 의 `policy_tags` 구체화 및 정책 엔진 연동 구현
-- **Skill** 의 `validation_hint` 상세 구현 및 자동 테스트
-- **Playbook** 의 `policy_bindings` 복합 정책 표현 및 동적 적용 로직
+이 문서는 OldClaw의 registry 계층에서 **Tool / Skill / Playbook**을 어떻게 구분하고, 어떤 메타데이터와 계약을 가져야 하는지 정의한다.  
+이 문서는 단순 예시 모음이 아니라, 이후 registry_service와 playbook execution, validation, policy binding이 흔들리지 않도록 하는 **기준 문서**다.
 
 ---
-*임의 적용*: 일부 필드(예: `policy_tags`) 는 현재 placeholder이며, M1 에서 구체화 예정.*
+
+## 2. 핵심 원칙
+
+OldClaw는 반드시 다음 구조를 유지한다.
+
+- **Tool** = primitive
+- **Skill** = reusable capability
+- **Playbook** = orchestrated procedure
+
+이 구분이 무너지면, 신규 업무가 들어올 때마다 코어를 수정하게 되고, registry 기반 확장이라는 설계 목표가 깨진다.
+
+---
+
+## 3. Tool 정의
+
+Tool은 가장 작은 원자 기능이다.
+
+예:
+- run_command
+- read_file
+- write_file
+- restart_service
+- fetch_log
+- query_metric
+
+### Tool의 역할
+- 실행 단위를 제공한다.
+- skill이 사용하는 실제 primitive다.
+- 직접적인 shell / file / API / metric / service interaction을 담당한다.
+
+### Tool이 가져야 하는 메타데이터
+- id
+- name
+- version
+- description
+- runtime_type
+- risk_level
+- input_schema_ref
+- output_schema_ref
+- timeouts
+- policy_tags
+- enabled
+
+### Tool의 금지사항
+- 여러 단계를 묶은 절차를 가지면 안 된다.
+- 특정 업무 시나리오 전체를 품으면 안 된다.
+- playbook 수준의 실패 정책을 가지면 안 된다.
+
+---
+
+## 4. Skill 정의
+
+Skill은 재사용 가능한 능력이다.
+
+예:
+- probe_linux_host
+- collect_web_latency_facts
+- check_tls_cert
+- analyze_wazuh_alert_burst
+- monitor_disk_growth
+- summarize_incident_timeline
+
+### Skill의 역할
+- 하나의 재사용 가능한 운영 능력을 정의한다.
+- 내부적으로 여러 tool을 사용할 수 있다.
+- validation hint와 evidence expectation을 가질 수 있다.
+- 그러나 전체 업무 절차 전체를 가져서는 안 된다.
+
+### Skill이 가져야 하는 메타데이터
+- id
+- name
+- version
+- category
+- description
+- input_schema_ref
+- output_schema_ref
+- required_tools
+- optional_tools
+- default_validation
+- policy_hint
+- evidence_expectations
+- enabled
+
+### Skill의 금지사항
+- 전체 incident 처리 절차를 모두 넣지 마라.
+- playbook처럼 approval gate, report, branching logic 전체를 품지 마라.
+- shell command 나열 자체를 skill 본문으로 두지 마라.
+
+---
+
+## 5. Playbook 정의
+
+Playbook은 skill과 validation/report 단계를 조합한 절차다.
+
+예:
+- diagnose_web_latency
+- onboard_new_linux_server
+- tune_siem_noise
+- nightly_health_baseline_check
+- monitor_siem_and_raise_incident
+
+### Playbook의 역할
+- step sequence를 정의한다.
+- 실행 모드(one_shot / batch / continuous)를 명시한다.
+- 실패 시 행동(retry, replan, approval request 등)을 정의한다.
+- policy binding과 asset scope expectations를 가진다.
+
+### Playbook이 가져야 하는 메타데이터
+- id
+- name
+- version
+- category
+- execution_mode
+- description
+- input_schema_ref
+- output_schema_ref
+- dry_run_supported
+- explain_supported
+- default_risk_level
+- required_asset_roles
+- steps
+- failure_policy
+- policy_bindings
+- enabled
+
+### Playbook의 금지사항
+- shell command를 직접 steps에 넣지 마라.
+- skill 없이 command 나열로 절차를 구성하지 마라.
+- 업무별 예외 로직을 core graph에 박아 넣지 마라.
+
+---
+
+## 6. Registry 파일 구조 원칙
+
+Registry 관련 파일은 최소 다음 구조를 유지한다.
+
+- `schemas/registry/tools/`
+- `schemas/registry/skills/`
+- `schemas/registry/playbooks/`
+- `seed/tools/`
+- `seed/skills/`
+- `seed/playbooks/`
+- `seed/policies/`
+
+### 구조 원칙
+- schema는 계약
+- seed는 초기 탑재 데이터
+- schemas와 seed의 naming은 일관되어야 한다
+- input/output schema ref는 실제 존재하는 파일을 가리켜야 한다
+
+---
+
+## 7. Versioning 원칙
+
+각 registry 객체는 version을 가져야 한다.
+
+### 목적
+- 변경 이력 추적
+- playbook 호환성 유지
+- 정책 바인딩 변경 추적
+- 향후 dry-run / explain mode와의 정합성 확보
+
+### M0 기준
+M0에서는 단순 semantic version 문자열로 시작한다.  
+version resolution logic은 M1 이후 구현 가능하되, version 필드는 이번 단계에서 반드시 고정한다.
+
+---
+
+## 8. Policy Binding 원칙
+
+Registry 객체는 policy/approval와 느슨하게 결합해야 한다.
+
+### Tool
+- policy_tags 중심
+
+### Skill
+- policy_hint 중심
+
+### Playbook
+- policy_bindings 중심
+
+즉, policy engine은 registry를 참고하되 registry 객체에 직접 business policy logic을 박아 넣지 않는다.
+
+---
+
+## 9. Validation / Evidence 연계 원칙
+
+Registry는 validation과 evidence를 염두에 두고 정의한다.
+
+### Tool
+- output schema 보장
+
+### Skill
+- evidence expectation
+- validation hint
+
+### Playbook
+- validation step
+- failure policy
+- report step
+
+이 구조를 통해 OldClaw는 evidence-first / validation-gated completion 구조를 유지한다.
+
+---
+
+## 10. M0에서 포함하는 최소 seed 범위
+
+### Tools
+- run_command
+- read_file
+- write_file
+- restart_service
+- fetch_log
+- query_metric
+
+### Skills
+- probe_linux_host
+- collect_web_latency_facts
+- check_tls_cert
+- analyze_wazuh_alert_burst
+- monitor_disk_growth
+- summarize_incident_timeline
+
+### Playbooks
+- diagnose_web_latency
+- onboard_new_linux_server
+- tune_siem_noise
+- nightly_health_baseline_check
+- monitor_siem_and_raise_incident
+
+---
+
+## 11. 이번 M0에서 확정된 것과 다음 단계로 넘긴 것
+
+### 이번 M0에서 확정
+- Tool / Skill / Playbook 경계
+- registry 파일 구조
+- 최소 seed 범위
+- version/policy/evidence 연계 원칙
+
+### M1 이후 구현
+- registry loader 실제 구현
+- registry version resolver
+- compatibility validator
+- policy binding evaluator
+- playbook composition execution engine
+
+---
+
+## 12. 임의 적용
+
+이번 M0에서는 YAML seed + JSON schema 조합을 유지한다.  
+이는 사람이 읽기 쉬운 seed와 기계 검증 가능한 schema를 동시에 만족시키기 위한 결정이다.
+
+이 임의 적용은 구조 원칙을 깨지 않는 한, **M0 기준선 고정을 위한 구현 편의**다.
