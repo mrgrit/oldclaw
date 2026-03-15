@@ -1,13 +1,22 @@
-# packages/pi_adapter/tools/__init__.py
-"""Tool Bridge definitions.
+from dataclasses import dataclass
 
-Each concrete tool class should implement `execute(**kwargs)` and return a
-standard result dict compatible with OldClaw evidence schema.
-"""
 
-class BaseTool:
-    def __init__(self, runtime):
-        self.runtime = runtime
+@dataclass(frozen=True)
+class ToolSelection:
+    names: list[str]
 
-    def execute(self, **kwargs):
-        raise NotImplementedError("Tool execution not implemented for M0")
+
+class ToolBridgeError(Exception):
+    pass
+
+
+def normalize_tool_names(tool_names: list[str] | None) -> list[str]:
+    if not tool_names:
+        return []
+
+    normalized: list[str] = []
+    for name in tool_names:
+        cleaned = name.strip()
+        if cleaned and cleaned not in normalized:
+            normalized.append(cleaned)
+    return normalized

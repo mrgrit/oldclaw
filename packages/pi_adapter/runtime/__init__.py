@@ -1,5 +1,12 @@
-# packages/pi_adapter/runtime/__init__.py
-from .client import PiRuntime
+from .client import PiRuntimeClient, PiRuntimeConfig
+
 
 class RuntimeError(NotImplementedError):
     pass
+
+
+__all__ = [
+    "PiRuntimeClient",
+    "PiRuntimeConfig",
+    "RuntimeError",
+]

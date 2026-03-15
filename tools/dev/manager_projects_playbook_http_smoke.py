@@ -18,31 +18,31 @@ def main() -> int:
     app = module.create_app()
     client = TestClient(app)
 
-    targets_resp = client.get("/targets")
-    targets_resp.raise_for_status()
-    targets = targets_resp.json().get("items", [])
-    if not targets:
+    playbooks_resp = client.get("/playbooks")
+    playbooks_resp.raise_for_status()
+    playbooks = playbooks_resp.json().get("items", [])
+    if not playbooks:
         raise SystemExit(1)
-    target_id = targets[0]["id"]
+    playbook_id = playbooks[0]["id"]
 
     create_resp = client.post(
         "/projects",
-        json={"name": "target-http", "request_text": "target http", "mode": "one_shot"},
+        json={"name": "playbook-http", "request_text": "playbook http", "mode": "one_shot"},
     )
     create_resp.raise_for_status()
     project_id = create_resp.json()["project"]["id"]
 
-    link_resp = client.post(f"/projects/{project_id}/targets/{target_id}")
+    link_resp = client.post(f"/projects/{project_id}/playbooks/{playbook_id}")
     link_resp.raise_for_status()
 
-    proj_targets_resp = client.get(f"/projects/{project_id}/targets")
-    proj_targets_resp.raise_for_status()
-    proj_targets = proj_targets_resp.json().get("items", [])
+    proj_playbooks_resp = client.get(f"/projects/{project_id}/playbooks")
+    proj_playbooks_resp.raise_for_status()
+    proj_playbooks = proj_playbooks_resp.json().get("items", [])
 
-    print("HTTP_TARGET_COUNT:", len(targets))
+    print("HTTP_PLAYBOOK_COUNT:", len(playbooks))
     print("HTTP_PROJECT_ID:", project_id)
-    print("HTTP_LINKED_TARGET_ID:", target_id)
-    print("HTTP_PROJECT_TARGET_COUNT:", len(proj_targets))
+    print("HTTP_LINKED_PLAYBOOK_ID:", playbook_id)
+    print("HTTP_PROJECT_PLAYBOOK_COUNT:", len(proj_playbooks))
     return 0
 
 

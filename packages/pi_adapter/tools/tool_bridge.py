@@ -1,14 +1,18 @@
-# packages/pi_adapter/tools/tool_bridge.py
-"""Concrete tool bridge implementations.
+from packages.pi_adapter.contracts import ToolCallRequest, ToolCallResponse
+from packages.pi_adapter.tools import normalize_tool_names
 
-Each tool class should inherit from `BaseTool` and implement `execute`.
-In M0 they raise NotImplementedError.
-"""
 
-from . import BaseTool
+class PiToolBridge:
+    """
+    Translate OldClaw tool selections into pi CLI arguments.
 
-class RunCommandTool(BaseTool):
-    def execute(self, command: str, timeout: int = 60):
-        raise NotImplementedError("RunCommandTool execution not implemented in M0")
+    This bridge does not implement OldClaw business logic.
+    It only converts the desired tool set into CLI flags.
+    """
 
-# Additional tool classes can be added here following the same pattern.
+    def build_cli_args(self, request: ToolCallRequest) -> ToolCallResponse:
+        tool_names = normalize_tool_names(request.tool_names)
+        if not tool_names:
+            return ToolCallResponse(cli_args=[])
+
+        return ToolCallResponse(cli_args=["--tools", ",".join(tool_names)])

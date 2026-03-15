@@ -1,17 +1,24 @@
-# packages/pi_adapter/translators/__init__.py
-"""Translation layer between OldClaw types and pi runtime types.
+import os
+import json
+from typing import Any
 
-Functions here convert OldClaw request/response structures to the format
-expected by the pi SDK and vice‑versa.
-"""
 
-def to_pi_message(oldclaw_obj: dict) -> dict:
-    """Translate an OldClaw dict to a pi SDK message payload.
-    """
-    # Placeholder implementation – in M0 we simply forward the dict.
-    return oldclaw_obj
+def build_prompt(prompt: str, context: dict[str, Any] | None = None) -> str:
+    if not context:
+        return prompt
 
-def from_pi_message(pi_msg: dict) -> dict:
-    """Translate a pi SDK response back to OldClaw format.
-    """
-    return pi_msg
+    context_text = json.dumps(context, ensure_ascii=False, indent=2, sort_keys=True)
+    return (
+        "OldClaw execution context:\n"
+        f"{context_text}\n\n"
+        "User prompt:\n"
+        f"{prompt}"
+    )
+
+
+def normalize_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+    return {
+        "stdout": stdout.strip(),
+        "stderr": stderr.strip(),
+        "exit_code": exit_code,
+    }

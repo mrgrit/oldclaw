@@ -178,4 +178,3 @@ PYTHONPATH=. python3 tools/dev/m2_integrated_smoke.py
 README는 현재 구현 상태를 반영하는 대표 문서다.
 없는 기능을 완성된 것처럼 적지 않는다.
 특히 playbook execution, approval/policy, graph 고도화, history/experience, continuous watch는 **계획 범위**이지 현재 완료 기능이 아니다.
-

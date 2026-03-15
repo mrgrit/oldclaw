@@ -3,38 +3,37 @@ from typing import Any
 from fastapi import APIRouter, FastAPI, HTTPException, status
 from pydantic import BaseModel
 
-from packages.pi_adapter.runtime import PiAdapterError, PiRuntimeClient, PiRuntimeConfig
+from packages.pi_adapter.runtime import PiRuntimeClient, PiRuntimeConfig
 from packages.project_service import (
     ProjectNotFoundError,
     ProjectServiceError,
     ProjectStageError,
+    close_project,
     create_minimal_evidence_record,
     create_project_record,
     execute_project_record,
     finalize_report_stage_record,
+    get_assets,
+    get_evidence_for_project,
+    get_playbooks,
+    get_project_assets,
+    get_project_playbooks,
     get_project_record,
     get_project_report,
-    get_evidence_for_project,
-    close_project,
-    get_targets,
-    link_target_to_project,
     get_project_targets,
+    get_targets,
+    link_asset_to_project,
+    link_playbook_to_project,
+    link_target_to_project,
+    plan_project_record,
+    validate_project_record,
 )
-
 
 
 class ProjectCreateRequest(BaseModel):
     name: str
     request_text: str
     mode: str = "one_shot"
-
-
-class AssetCreateRequest(BaseModel):
-    name: str
-    asset_type: str
-    platform: str
-    mgmt_ip: str
-    env: str
 
 
 class RuntimePromptRequest(BaseModel):
@@ -50,7 +49,7 @@ class MinimalEvidenceRequest(BaseModel):
 
 
 def create_health_router() -> APIRouter:
-    router = APIRouter(tags=["health"])
+    router = APIRouter(tags=["health"]) 
 
     @router.get("/health")
     def health() -> dict[str, str]:
@@ -61,12 +60,12 @@ def create_health_router() -> APIRouter:
 
 def create_runtime_router() -> APIRouter:
     router = APIRouter(prefix="/runtime", tags=["runtime"])
-    client = PiRuntimeClient(PiRuntimeConfig(default_role="manager"))
+    client = PiRuntimeClient(PiRuntimeConfig())
 
     @router.post("/invoke")
     def invoke_runtime(payload: RuntimePromptRequest) -> dict[str, Any]:
         try:
-            session_id = client.open_session("manager-api-runtime", role=payload.role)
+            session_id = client.open_session("manager-api-runtime")
             result = client.invoke_model(
                 payload.prompt,
                 {
@@ -75,21 +74,16 @@ def create_runtime_router() -> APIRouter:
                 },
             )
             client.close_session(session_id)
-            return {
-                "status": "ok",
-                "session_id": session_id,
-                "result": result,
-            }
-        except PiAdapterError as exc:
+            return {"status": "ok", "session_id": session_id, "result": result}
+        except NotImplementedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail={"message": str(exc)},
+            ) from exc
+        except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "message": "pi adapter invocation failed",
-                    "error": exc.error.message,
-                    "stdout": exc.error.stdout,
-                    "stderr": exc.error.stderr,
-                    "exit_code": exc.error.exit_code,
-                },
+                detail={"message": f"runtime invocation failed: {exc}"},
             ) from exc
 
     return router
@@ -119,15 +113,9 @@ def create_project_router() -> APIRouter:
             project = plan_project_record(project_id)
             return {"status": "ok", "project": project}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
         except ProjectServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.get("/{project_id}")
     def get_project(project_id: str) -> dict[str, Any]:
@@ -135,10 +123,7 @@ def create_project_router() -> APIRouter:
             project = get_project_record(project_id)
             return {"status": "ok", "project": project}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/execute")
     def execute_project(project_id: str) -> dict[str, Any]:
@@ -146,15 +131,9 @@ def create_project_router() -> APIRouter:
             result = execute_project_record(project_id)
             return {"status": "ok", "result": result}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
         except ProjectServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/validate")
     def validate_project(project_id: str) -> dict[str, Any]:
@@ -162,15 +141,9 @@ def create_project_router() -> APIRouter:
             result = validate_project_record(project_id)
             return {"status": "ok", "result": result}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
         except ProjectServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/report/finalize")
     def finalize_report(project_id: str) -> dict[str, Any]:
@@ -178,15 +151,9 @@ def create_project_router() -> APIRouter:
             result = finalize_report_stage_record(project_id)
             return {"status": "ok", "result": result}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
         except ProjectServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/evidence/minimal")
     def create_minimal_evidence(project_id: str, payload: MinimalEvidenceRequest) -> dict[str, Any]:
@@ -200,10 +167,7 @@ def create_project_router() -> APIRouter:
             )
             return {"status": "ok", "evidence": evidence}
         except ProjectServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.get("/{project_id}/report")
     def get_project_report_endpoint(project_id: str) -> dict[str, Any]:
@@ -211,10 +175,7 @@ def create_project_router() -> APIRouter:
             report = get_project_report(project_id)
             return {"status": "ok", "report": report}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            ) from exc
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
 
     @router.get("/{project_id}/evidence")
     def get_project_evidence_endpoint(project_id: str) -> dict[str, Any]:
@@ -222,27 +183,32 @@ def create_project_router() -> APIRouter:
             items = get_evidence_for_project(project_id)
             return {"status": "ok", "project_id": project_id, "items": items}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            )
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/close")
+    def close_project_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            project = close_project(project_id)
+            return {"status": "ok", "project": project}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/assets/{asset_id}")
     def link_project_asset(project_id: str, asset_id: str) -> dict[str, Any]:
         try:
             result = link_asset_to_project(project_id, asset_id)
-            return {"status": "ok", "project_id": result["project_id"], "asset_id": result["asset_id"], "role": result["scope_role"]}
+            return {
+                "status": "ok",
+                "project_id": result["project_id"],
+                "asset_id": result["asset_id"],
+                "role": result["scope_role"],
+            }
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            )
-        except ProjectStageError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": str(exc)},
-            )
-
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.get("/{project_id}/assets")
     def get_project_assets_endpoint(project_id: str) -> dict[str, Any]:
@@ -250,32 +216,22 @@ def create_project_router() -> APIRouter:
             items = get_project_assets(project_id)
             return {"status": "ok", "project_id": project_id, "items": items}
         except ProjectNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": str(exc)},
-            )
-
-
-    return router
-
-
-def create_target_router() -> APIRouter:
-    router = APIRouter(prefix="/targets", tags=["targets"])
-
-    @router.get("")
-    def list_targets() -> dict[str, Any]:
-        items = get_targets()
-        return {"items": items}
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/targets/{target_id}")
     def link_project_target(project_id: str, target_id: str) -> dict[str, Any]:
         try:
             result = link_target_to_project(project_id, target_id)
-            return {"status": "ok", "project_id": result["project_id"], "target_id": result["target_id"], "role": result["scope_role"]}
+            return {
+                "status": "ok",
+                "project_id": result["project_id"],
+                "target_id": result["target_id"],
+                "role": result["scope_role"],
+            }
         except ProjectNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": str(exc)})
-        except ProjectStageError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": str(exc)})
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.get("/{project_id}/targets")
     def get_project_targets_endpoint(project_id: str) -> dict[str, Any]:
@@ -283,7 +239,30 @@ def create_target_router() -> APIRouter:
             items = get_project_targets(project_id)
             return {"status": "ok", "project_id": project_id, "items": items}
         except ProjectNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": str(exc)})
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/playbooks/{playbook_id}")
+    def link_project_playbook(project_id: str, playbook_id: str) -> dict[str, Any]:
+        try:
+            result = link_playbook_to_project(project_id, playbook_id)
+            return {
+                "status": "ok",
+                "project_id": result["project_id"],
+                "playbook_id": result["playbook_id"],
+                "role": result["role"],
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/playbooks")
+    def get_project_playbooks_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            items = get_project_playbooks(project_id)
+            return {"status": "ok", "project_id": project_id, "items": items}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
 
     return router
 
@@ -293,30 +272,17 @@ def create_asset_router() -> APIRouter:
 
     @router.get("")
     def list_assets() -> dict[str, Any]:
-        items = get_assets()
-        return {"items": items}
+        return {"items": get_assets()}
 
-    @router.get("/{asset_id}")
-    def get_asset(asset_id: str) -> dict[str, Any]:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "message": "Asset query service is not implemented in M0.",
-                "next_milestone": "M4",
-                "asset_id": asset_id,
-            },
-        )
+    return router
 
-    @router.post("/{asset_id}/resolve")
-    def resolve_asset(asset_id: str) -> dict[str, Any]:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "message": "Asset resolve flow is not implemented in M0.",
-                "next_milestone": "M4",
-                "asset_id": asset_id,
-            },
-        )
+
+def create_target_router() -> APIRouter:
+    router = APIRouter(prefix="/targets", tags=["targets"])
+
+    @router.get("")
+    def list_targets() -> dict[str, Any]:
+        return {"items": get_targets()}
 
     return router
 
@@ -326,41 +292,7 @@ def create_playbook_router() -> APIRouter:
 
     @router.get("")
     def list_playbooks() -> dict[str, Any]:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "message": "Playbook registry query is not implemented in M0.",
-                "next_milestone": "M6",
-            },
-        )
-
-    @router.post("/{playbook_id}/run")
-    def run_playbook(playbook_id: str) -> dict[str, Any]:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "message": "Playbook execution is not implemented in M0.",
-                "next_milestone": "M6",
-                "playbook_id": playbook_id,
-            },
-        )
-
-    return router
-
-
-def create_evidence_router() -> APIRouter:
-    router = APIRouter(prefix="/evidence", tags=["evidence"])
-
-    @router.get("/projects/{project_id}")
-    def get_project_evidence(project_id: str) -> dict[str, Any]:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "message": "Evidence query is not implemented in M0.",
-                "next_milestone": "M5",
-                "project_id": project_id,
-            },
-        )
+        return {"items": get_playbooks()}
 
     return router
 
@@ -368,8 +300,8 @@ def create_evidence_router() -> APIRouter:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="OldClaw Manager API",
-        version="0.2.2-m2",
-        description="M2 manager API with minimal DB-backed lifecycle, report finalize, and evidence routes.",
+        version="0.3.0-m3",
+        description="Manager API with minimal lifecycle, evidence, asset, target, and playbook routes.",
     )
 
     app.include_router(create_health_router())
@@ -377,9 +309,7 @@ def create_app() -> FastAPI:
     app.include_router(create_project_router())
     app.include_router(create_asset_router())
     app.include_router(create_target_router())
-
     app.include_router(create_playbook_router())
-    app.include_router(create_evidence_router())
 
     return app
 

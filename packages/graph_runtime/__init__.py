@@ -17,10 +17,22 @@ DEFAULT_STAGE_TRANSITIONS = {
 }
 
 
+class GraphRuntimeError(Exception):
+    pass
+
+
 def get_next_stage(stage: str) -> str | None:
     if stage not in DEFAULT_STAGE_TRANSITIONS:
-        raise KeyError(f"Unknown stage: {stage}")
+        raise GraphRuntimeError(f"Unknown stage: {stage}")
     return DEFAULT_STAGE_TRANSITIONS[stage]
+
+
+def require_transition(current_stage: str, next_stage: str) -> None:
+    expected = get_next_stage(current_stage)
+    if expected != next_stage:
+        raise GraphRuntimeError(
+            f"Invalid stage transition: {current_stage} -> {next_stage} (expected {expected})"
+        )
 
 
 def build_minimal_project_graph() -> dict[str, object]:

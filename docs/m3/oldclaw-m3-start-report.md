@@ -16,19 +16,26 @@
 - 프로젝트에 연결된 target 목록 조회 (`GET /projects/{project_id}/targets`)
 - project summary에 linked targets 리스트 포함 (`get_project_report_evidence_summary` 확장)
 
+## 이번 WORK-32에서 추가한 범위
+- `playbooks` 테이블 조회 (`GET /playbooks`)
+- 프로젝트에 playbook 연결 (`POST /projects/{project_id}/playbooks/{playbook_id}`)
+- 프로젝트에 연결된 playbook 목록 조회 (`GET /projects/{project_id}/playbooks`)
+- project summary에 linked playbooks 리스트 포함 (`get_project_report_evidence_summary` 확장)
+
 ## 아직 하지 않은 것 (M3 이후 계획)
-- 실제 runtime dispatch 를 통한 target 명령 실행
-- playbook 와 target 매핑 / 실행
+- playbook step 실제 실행
+- runtime dispatch
 - approval / policy gate 연동
 - graph_runtime 고도화 및 전체 오케스트레이션 로직
-- CI/CD 파이프라인에 target 경로 테스트 자동화
+- CI/CD 파이프라인에 playbook 경로 테스트 자동화
 
 ## 대표 테스트 항목
-- `tools/dev/project_target_smoke.py` 로 전체 흐름 검증 (target 조회 → project 생성 → 연결 → 조회 → summary)
-- `tools/dev/manager_projects_target_http_smoke.py` 로 HTTP 레벨 검증 (GET /targets, POST /projects, POST /projects/{id}/targets/{tid}, GET /projects/{id}/targets)
+- `tools/dev/project_playbook_smoke.py` 로 전체 흐름 검증 (playbook 조회 → project 생성 → 연결 → 조회 → summary)
+- `tools/dev/manager_projects_playbook_http_smoke.py` 로 HTTP 레벨 검증 (GET /playbooks, POST /projects, POST /projects/{id}/playbooks/{pbid}, GET /projects/{id}/playbooks)
 
 ## 현재 상태 (과장 없이)
-- DB schema 에 `targets` 테이블이 존재하고, 최소 컬럼(`id, asset_id, base_url, resolved_at, health, metadata`)을 보유한다.
-- 프로젝트‑target 연결을 위한 `project_targets` 테이블을 런타임에 생성하고, 기본적인 멱등 삽입을 지원한다.
-- API 레이어에서 위 엔드포인트를 제공하며, 존재하지 않는 프로젝트/target 에는 404 응답을 반환한다.
-- 아직 target‑specific playbook 실행이나 정책 적용 로직은 구현되지 않았다.
+- DB schema 에 `playbooks` 테이블이 존재하고, 최소 컬럼(`id, version, name, description, enabled, created_at`)을 보유한다.
+- 프로젝트‑playbook 연결을 위한 `project_playbooks` 테이블을 런타임에 생성하고, 기본적인 멱등 삽입을 지원한다.
+- API 레이어에서 위 엔드포인트를 제공하며, 존재하지 않는 프로젝트/playbook 에는 404 응답을 반환한다.
+- 아직 playbook‑specific 실행이나 정책 적용 로직은 구현되지 않았다.
+

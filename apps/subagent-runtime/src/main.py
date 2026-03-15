@@ -3,6 +3,8 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, status
 
+from packages.pi_adapter.runtime import PiAdapterError, PiRuntimeClient, PiRuntimeConfig
+
 
 @dataclass
 class RunScriptRequest:
@@ -16,6 +18,12 @@ class RunScriptRequest:
 class A2ARunResponse:
     status: str
     detail: dict[str, Any]
+
+
+@dataclass
+class RuntimePromptRequest:
+    prompt: str
+    role: str = "subagent"
 
 
 def create_health_router() -> APIRouter:
@@ -40,9 +48,39 @@ def create_capabilities_router() -> APIRouter:
                 "capabilities",
                 "run_script_request_boundary",
                 "evidence_return_boundary",
+                "runtime_invoke_boundary",
             ],
-            "note": "Actual execution engine is not implemented in M0.",
+            "note": "Execution engine is still not implemented; runtime invoke path is available.",
         }
+
+    return router
+
+
+def create_runtime_router() -> APIRouter:
+    router = APIRouter(prefix="/runtime", tags=["runtime"])
+    client = PiRuntimeClient(PiRuntimeConfig(default_role="subagent"))
+
+    @router.post("/invoke")
+    def invoke_runtime(payload: RuntimePromptRequest) -> dict[str, Any]:
+        try:
+            session_id = client.open_session("subagent-runtime", role=payload.role)
+            result = client.invoke_model(
+                payload.prompt,
+                {"session_id": session_id, "role": payload.role},
+            )
+            client.close_session(session_id)
+            return {"status": "ok", "session_id": session_id, "result": result}
+        except PiAdapterError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "pi adapter invocation failed",
+                    "error": exc.error.message,
+                    "stdout": exc.error.stdout,
+                    "stderr": exc.error.stderr,
+                    "exit_code": exc.error.exit_code,
+                },
+            ) from exc
 
     return router
 
@@ -68,12 +106,13 @@ def create_a2a_router() -> APIRouter:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="OldClaw SubAgent Runtime",
-        version="0.1.0-m0",
-        description="M0 skeleton for subagent runtime boundaries and A2A request contracts.",
+        version="0.1.0-m1",
+        description="M1 subagent runtime with minimal pi adapter integration endpoint.",
     )
 
     app.include_router(create_health_router())
     app.include_router(create_capabilities_router())
+    app.include_router(create_runtime_router())
     app.include_router(create_a2a_router())
 
     return app
