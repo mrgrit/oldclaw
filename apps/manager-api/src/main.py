@@ -16,9 +16,9 @@ from packages.project_service import (
     get_project_report,
     get_evidence_for_project,
     close_project,
-    get_assets,
-    link_asset_to_project,
-    get_project_assets,
+    get_targets,
+    link_target_to_project,
+    get_project_targets,
 )
 
 
@@ -259,6 +259,35 @@ def create_project_router() -> APIRouter:
     return router
 
 
+def create_target_router() -> APIRouter:
+    router = APIRouter(prefix="/targets", tags=["targets"])
+
+    @router.get("")
+    def list_targets() -> dict[str, Any]:
+        items = get_targets()
+        return {"items": items}
+
+    @router.post("/{project_id}/targets/{target_id}")
+    def link_project_target(project_id: str, target_id: str) -> dict[str, Any]:
+        try:
+            result = link_target_to_project(project_id, target_id)
+            return {"status": "ok", "project_id": result["project_id"], "target_id": result["target_id"], "role": result["scope_role"]}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": str(exc)})
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": str(exc)})
+
+    @router.get("/{project_id}/targets")
+    def get_project_targets_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            items = get_project_targets(project_id)
+            return {"status": "ok", "project_id": project_id, "items": items}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": str(exc)})
+
+    return router
+
+
 def create_asset_router() -> APIRouter:
     router = APIRouter(prefix="/assets", tags=["assets"])
 
@@ -347,6 +376,8 @@ def create_app() -> FastAPI:
     app.include_router(create_runtime_router())
     app.include_router(create_project_router())
     app.include_router(create_asset_router())
+    app.include_router(create_target_router())
+
     app.include_router(create_playbook_router())
     app.include_router(create_evidence_router())
 

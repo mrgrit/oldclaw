@@ -475,8 +475,124 @@ def get_evidence_for_project(project_id: str, database_url: str | None = None) -
 
 
 
+def get_targets(database_url: str | None = None) -> list[dict[str, Any]]:
+    """Return list of targets with selected fields (mapped to required output)."""
+    sql = """
+    SELECT id,
+           asset_id,
+           base_url AS endpoint,
+           health AS status,
+           NULL::text AS kind,
+           NULL::text AS name,
+           resolved_at AS created_at,
+           resolved_at AS updated_at
+    FROM targets
+    ORDER BY created_at ASC
+    """
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
+
+
+def link_target_to_project(project_id: str, target_id: str, role: str = "primary", database_url: str | None = None) -> dict[str, Any]:
+    """Link a target to a project. Creates linking table if needed. Idempotent."""
+    # Verify existence of project and target
+    get_project_record(project_id, database_url=database_url)
+    # verify target exists
+    sql_check = "SELECT id FROM targets WHERE id = %s"
+    with get_connection(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_check, (target_id,))
+            if cur.fetchone() is None:
+                raise ProjectNotFoundError(f"Target not found: {target_id}")
+    # Ensure linking table exists
+    with get_connection(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_targets (
+                    project_id text NOT NULL,
+                    target_id text NOT NULL,
+                    scope_role text NOT NULL DEFAULT 'primary',
+                    created_at timestamp with time zone NOT NULL DEFAULT now(),
+                    PRIMARY KEY (project_id, target_id),
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE,
+                    CHECK (scope_role = ANY (ARRAY['primary','dependent','observer']))
+                )
+                """
+            )
+    # Insert link idempotently
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO project_targets (project_id, target_id, scope_role)
+                VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING project_id, target_id, scope_role
+                """,
+                (project_id, target_id, role),
+            )
+            row = cur.fetchone()
+            if row is None:
+                # already exists, fetch existing
+                cur.execute(
+                    """
+                    SELECT project_id, target_id, scope_role FROM project_targets
+                    WHERE project_id = %s AND target_id = %s
+                    """,
+                    (project_id, target_id),
+                )
+                row = cur.fetchone()
+            return dict(row)
+
+
+def get_project_targets(project_id: str, database_url: str | None = None) -> list[dict[str, Any]]:
+    """Return targets linked to a project with target details."""
+    sql = """
+    SELECT pt.project_id,
+           pt.target_id,
+           pt.scope_role AS role,
+           t.id,
+           NULL::text AS kind,
+           NULL::text AS name,
+           t.base_url AS endpoint,
+           t.health AS status,
+           t.asset_id,
+           t.resolved_at AS created_at,
+           t.resolved_at AS updated_at
+    FROM project_targets pt
+    JOIN targets t ON pt.target_id = t.id
+    WHERE pt.project_id = %s
+    ORDER BY t.id ASC
+    """
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (project_id,))
+            rows = cur.fetchall()
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                target = {
+                    "id": row_dict.pop("id"),
+                    "kind": row_dict.pop("kind"),
+                    "name": row_dict.pop("name"),
+                    "endpoint": row_dict.pop("endpoint"),
+                    "status": row_dict.pop("status"),
+                    "asset_id": row_dict.pop("asset_id"),
+                    "created_at": row_dict.pop("created_at"),
+                    "updated_at": row_dict.pop("updated_at"),
+                }
+                row_dict["target"] = target
+                result.append(row_dict)
+            return result
+
+
 def get_project_report_evidence_summary(project_id: str, database_url: str | None = None) -> dict[str, Any]:
-    """Return a summary containing project, latest report, evidence list, and linked assets."""
+    """Return a summary containing project, latest report, evidence list, linked assets, and linked targets."""
     project = get_project_record(project_id, database_url=database_url)
     try:
         report = get_project_report(project_id, database_url=database_url)
@@ -484,5 +600,6 @@ def get_project_report_evidence_summary(project_id: str, database_url: str | Non
         report = None
     evidence = get_evidence_for_project(project_id, database_url=database_url)
     assets = get_project_assets(project_id, database_url=database_url)
-    return {"project": project, "report": report, "evidence": evidence, "assets": assets}
+    targets = get_project_targets(project_id, database_url=database_url)
+    return {"project": project, "report": report, "evidence": evidence, "assets": assets, "targets": targets}
 
