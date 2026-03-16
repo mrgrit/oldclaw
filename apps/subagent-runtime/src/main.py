@@ -1,27 +1,31 @@
-from dataclasses import asdict, dataclass
+import subprocess
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, status
+from pydantic import BaseModel
 
 from packages.pi_adapter.runtime import PiAdapterError, PiRuntimeClient, PiRuntimeConfig
+from packages.project_service import (
+    JobRunNotFoundError,
+    ProjectNotFoundError,
+    ProjectServiceError,
+    record_subagent_execution_result,
+)
 
 
-@dataclass
-class RunScriptRequest:
+class RunScriptRequest(BaseModel):
     project_id: str
     job_run_id: str
     script: str
     timeout_s: int = 120
 
 
-@dataclass
-class A2ARunResponse:
+class A2ARunResponse(BaseModel):
     status: str
     detail: dict[str, Any]
 
 
-@dataclass
-class RuntimePromptRequest:
+class RuntimePromptRequest(BaseModel):
     prompt: str
     role: str = "subagent"
 
@@ -46,11 +50,11 @@ def create_capabilities_router() -> APIRouter:
             "capabilities": [
                 "health",
                 "capabilities",
-                "run_script_request_boundary",
-                "evidence_return_boundary",
+                "run_script_execution",
+                "evidence_persistence",
                 "runtime_invoke_boundary",
             ],
-            "note": "Execution engine is still not implemented; runtime invoke path is available.",
+            "note": "Local script execution and evidence persistence are available.",
         }
 
     return router
@@ -90,13 +94,68 @@ def create_a2a_router() -> APIRouter:
 
     @router.post("/run_script")
     def run_script(payload: RunScriptRequest) -> A2ARunResponse:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        try:
+            completed = subprocess.run(
+                ["/bin/bash", "-lc", payload.script],
+                text=True,
+                capture_output=True,
+                timeout=payload.timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            try:
+                recorded = record_subagent_execution_result(
+                    project_id=payload.project_id,
+                    job_run_id=payload.job_run_id,
+                    command_text=payload.script,
+                    stdout=stdout,
+                    stderr=(stderr + "\nscript execution timed out").strip(),
+                    exit_code=124,
+                )
+            except (ProjectNotFoundError, JobRunNotFoundError) as record_exc:
+                raise HTTPException(status_code=404, detail={"message": str(record_exc)}) from record_exc
+            except ProjectServiceError as record_exc:
+                raise HTTPException(status_code=400, detail={"message": str(record_exc)}) from record_exc
+
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail={
+                    "message": "script execution timed out",
+                    "project_id": payload.project_id,
+                    "job_run_id": payload.job_run_id,
+                    "timeout_s": payload.timeout_s,
+                    "job_run": recorded["job_run"],
+                    "evidence": recorded["evidence"],
+                },
+            ) from exc
+
+        try:
+            recorded = record_subagent_execution_result(
+                project_id=payload.project_id,
+                job_run_id=payload.job_run_id,
+                command_text=payload.script,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                exit_code=completed.returncode,
+            )
+        except (ProjectNotFoundError, JobRunNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+        result_status = "ok" if completed.returncode == 0 else "failed"
+        return A2ARunResponse(
+            status=result_status,
             detail={
-                "message": "SubAgent execution engine is not implemented in M0.",
-                "next_milestone": "M3",
-                "request": asdict(payload),
-                "reason": "M0 only fixes the boundary and request contract.",
+                "project_id": payload.project_id,
+                "job_run_id": payload.job_run_id,
+                "command": payload.script,
+                "stdout": completed.stdout.strip(),
+                "stderr": completed.stderr.strip(),
+                "exit_code": completed.returncode,
+                "job_run": recorded["job_run"],
+                "evidence": recorded["evidence"],
             },
         )
 
@@ -106,8 +165,8 @@ def create_a2a_router() -> APIRouter:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="OldClaw SubAgent Runtime",
-        version="0.1.0-m1",
-        description="M1 subagent runtime with minimal pi adapter integration endpoint.",
+        version="0.2.0-m3",
+        description="M3 subagent runtime with local script execution and evidence persistence.",
     )
 
     app.include_router(create_health_router())

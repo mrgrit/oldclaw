@@ -44,7 +44,7 @@ OldClaw의 기본 구조는 아래와 같다.
 - **SubAgent / Runtime**: 실제 환경에서 명령을 수행하는 실행 계층
 - **pi runtime**: 실제 작업 실행을 담당하는 런타임 엔진
 
-현재 구현은 전체 비전 중 **M2까지의 최소 골격**에 해당한다. 즉, 장기 계획 전체가 완성된 것은 아니며, 현재는 다음을 중심으로 최소 동작 경로를 확보한 상태다.
+현재 구현은 전체 비전 중 **M2 완료 + M3 초기 진입 상태**에 해당한다. 즉, 장기 계획 전체가 완성된 것은 아니며, 현재는 다음을 중심으로 최소 동작 경로를 확보한 상태다.
 
 - DB‑backed project lifecycle
 - report finalize 최소 경로
@@ -53,6 +53,8 @@ OldClaw의 기본 구조는 아래와 같다.
 - asset 목록 조회
 - project‑asset 연결
 - project linked assets 조회
+- target 목록 조회 및 project‑target 연결
+- playbook 목록 조회 및 project‑playbook 연결
 
 ---
 
@@ -83,7 +85,7 @@ OldClaw의 개발은 마일스톤 기반으로 진행된다.
 
 ---
 
-## 4. 현재 구현 상태 (M2 기준)
+## 4. 현재 구현 상태 (M2 완료 / M3 초기 기준)
 
 현재 기준으로 실제 확인된 것은 아래와 같다.
 
@@ -97,10 +99,16 @@ OldClaw의 개발은 마일스톤 기반으로 진행된다.
 - asset 목록 조회
 - project에 asset 연결
 - project linked assets 조회
+- target 목록 조회
+- project에 target 연결
+- project linked targets 조회
+- playbook 목록 조회
+- project에 playbook 연결
+- project linked playbooks 조회
 - 개발용 smoke test 다수 확보
 
 ### 아직 남아 있는 것
-- target resolution
+- target resolution pipeline
 - playbook registry의 실제 실행 연결
 - approval / policy gate
 - graph_runtime 고도화

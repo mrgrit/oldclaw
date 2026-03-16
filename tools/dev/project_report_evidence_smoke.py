@@ -22,7 +22,7 @@ def main() -> int:
 
     plan_project_record(project_id)
     execute_project_record(project_id)
-    validate_project_record(project_id)
+    validated = validate_project_record(project_id)
     finalized = finalize_report_stage_record(project_id)
     evidence = create_minimal_evidence_record(
         project_id=project_id,
@@ -40,6 +40,7 @@ def main() -> int:
     summary = get_project_report_evidence_summary(project_id)
 
     print("PROJECT_ID:", project_id)
+    print("VALIDATION_STATUS:", validated["validation_run"]["status"])
     print("FINAL_STAGE_BEFORE_CLOSE:", finalized["project"]["current_stage"])
     print("EVIDENCE_COUNT:", evidence_count)
     print("FINAL_STAGE_AFTER_CLOSE:", close_result["current_stage"])

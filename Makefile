@@ -1,21 +1,26 @@
 # Makefile for OldClaw
 
-.PHONY: install lint test run-manager run-master run-subagent
+.PHONY: install lint test compile run-manager run-master run-subagent
+
+PYTHON ?= python3
 
 install:
-	poetry install
+	$(PYTHON) -m pip install -r requirements.txt
 
 lint:
-	poetry run flake8 .
+	$(PYTHON) -m compileall apps packages tools
 
 test:
-	poetry run pytest -s -vv
+	$(PYTHON) -m pytest -s -vv
+
+compile:
+	$(PYTHON) -m compileall apps packages tools
 
 run-manager:
-	poetry run uvicorn apps.manager_api.src.main:app --reload
+	$(PYTHON) -m uvicorn --app-dir apps/manager-api/src main:app --reload
 
 run-master:
-	poetry run uvicorn apps.master_service.src.main:app --reload
+	$(PYTHON) -m uvicorn --app-dir apps/master-service/src main:app --reload
 
 run-subagent:
-	python apps.subagent_runtime.src.main.py
+	$(PYTHON) -m uvicorn --app-dir apps/subagent-runtime/src main:app --reload

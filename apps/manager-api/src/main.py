@@ -1,14 +1,30 @@
-from typing import Any
+import os
+from typing import Any, Callable
 
 from fastapi import APIRouter, FastAPI, HTTPException, status
+import httpx
 from pydantic import BaseModel
 
+from packages.approval_engine import (
+    approve_project_approval,
+    build_approval_request,
+    create_approval_request_record,
+    has_project_approval,
+    list_project_approvals,
+)
 from packages.pi_adapter.runtime import PiRuntimeClient, PiRuntimeConfig
+from packages.policy_engine import (
+    PolicyDeniedError,
+    evaluate_project_policy,
+)
 from packages.project_service import (
+    build_project_execution_script,
     ProjectNotFoundError,
     ProjectServiceError,
     ProjectStageError,
     close_project,
+    create_skill_execution_evidence_records,
+    create_subagent_job_run,
     create_minimal_evidence_record,
     create_project_record,
     execute_project_record,
@@ -46,6 +62,89 @@ class MinimalEvidenceRequest(BaseModel):
     stdout: str
     stderr: str = ""
     exit_code: int = 0
+
+
+class SubagentDispatchRequest(BaseModel):
+    script: str
+    timeout_s: int = 120
+
+
+class ExecuteRunRequest(BaseModel):
+    script: str
+    timeout_s: int = 120
+
+
+class ApprovalDecisionRequest(BaseModel):
+    approver_id: str = "human-reviewer"
+
+
+def default_subagent_runner(payload: dict[str, Any]) -> dict[str, Any]:
+    subagent_url = os.getenv(
+        "OLDCLAW_SUBAGENT_URL",
+        "http://127.0.0.1:8012",
+    ).rstrip("/")
+    with httpx.Client(timeout=max(int(payload.get("timeout_s", 120)) + 5, 10)) as client:
+        response = client.post(f"{subagent_url}/a2a/run_script", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+def _run_execute_auto_flow(
+    project_id: str,
+    runner: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
+    execution_plan = build_project_execution_script(project_id)
+    execute_result = execute_project_record(project_id)
+    job_run = create_subagent_job_run(project_id)
+    subagent_result = runner(
+        {
+            "project_id": project_id,
+            "job_run_id": job_run["id"],
+            "script": execution_plan["script"],
+            "timeout_s": 120,
+        }
+    )
+    skill_evidence = create_skill_execution_evidence_records(
+        project_id=project_id,
+        job_run_id=job_run["id"],
+        resolved_skills=execution_plan["resolved_skills"],
+    )
+    return {
+        "execution_plan": execution_plan,
+        "execute_result": execute_result,
+        "job_run": job_run,
+        "subagent_result": subagent_result,
+        "skill_evidence": skill_evidence,
+    }
+
+
+def _require_execution_policy(project_id: str) -> dict[str, Any]:
+    decision = evaluate_project_policy(project_id)
+    if decision.allowed:
+        return decision.to_dict()
+    if decision.requires_approval and has_project_approval(project_id, decision.policy_name):
+        approved = decision.to_dict()
+        approved["allowed"] = True
+        approved["requires_approval"] = False
+        approved["reason"] = f"approved override for policy {decision.policy_name}"
+        approved["approval_status"] = "approved"
+        return approved
+    raise PolicyDeniedError(decision)
+
+
+def _build_policy_denial_detail(project_id: str, exc: PolicyDeniedError) -> dict[str, Any]:
+    approval_request = None
+    if exc.decision.requires_approval:
+        approval_record = create_approval_request_record(project_id, exc.decision)
+        approval_request = {
+            **build_approval_request(project_id, exc.decision),
+            "approval_id": approval_record["id"],
+        }
+    return {
+        "message": exc.decision.reason,
+        "policy": exc.decision.to_dict(),
+        "approval_request": approval_request,
+    }
 
 
 def create_health_router() -> APIRouter:
@@ -89,8 +188,11 @@ def create_runtime_router() -> APIRouter:
     return router
 
 
-def create_project_router() -> APIRouter:
+def create_project_router(
+    subagent_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/projects", tags=["projects"])
+    runner = subagent_runner or default_subagent_runner
 
     @router.post("")
     def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
@@ -130,6 +232,237 @@ def create_project_router() -> APIRouter:
         try:
             result = execute_project_record(project_id)
             return {"status": "ok", "result": result}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/dispatch/subagent")
+    def dispatch_subagent(project_id: str, payload: SubagentDispatchRequest) -> dict[str, Any]:
+        try:
+            policy = _require_execution_policy(project_id)
+            job_run = create_subagent_job_run(project_id)
+            result = runner(
+                {
+                    "project_id": project_id,
+                    "job_run_id": job_run["id"],
+                    "script": payload.script,
+                    "timeout_s": payload.timeout_s,
+                }
+            )
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "policy": policy,
+                "job_run": job_run,
+                "subagent_result": result,
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except PolicyDeniedError as exc:
+            status_code = 403 if exc.decision.requires_approval else 400
+            raise HTTPException(status_code=status_code, detail=_build_policy_denial_detail(project_id, exc)) from exc
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "subagent returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"subagent dispatch failed: {exc}"},
+            ) from exc
+
+    @router.post("/{project_id}/execute/run")
+    def execute_project_run(project_id: str, payload: ExecuteRunRequest) -> dict[str, Any]:
+        try:
+            policy = _require_execution_policy(project_id)
+            execute_result = execute_project_record(project_id)
+            job_run = create_subagent_job_run(project_id)
+            subagent_result = runner(
+                {
+                    "project_id": project_id,
+                    "job_run_id": job_run["id"],
+                    "script": payload.script,
+                    "timeout_s": payload.timeout_s,
+                }
+            )
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "policy": policy,
+                "execute_result": execute_result,
+                "job_run": job_run,
+                "subagent_result": subagent_result,
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except PolicyDeniedError as exc:
+            status_code = 403 if exc.decision.requires_approval else 400
+            raise HTTPException(status_code=status_code, detail=_build_policy_denial_detail(project_id, exc)) from exc
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "subagent returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"subagent dispatch failed: {exc}"},
+            ) from exc
+
+    @router.post("/{project_id}/execute/auto")
+    def execute_project_auto(project_id: str) -> dict[str, Any]:
+        try:
+            policy = _require_execution_policy(project_id)
+            flow = _run_execute_auto_flow(project_id, runner)
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "policy": policy,
+                **flow,
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except PolicyDeniedError as exc:
+            status_code = 403 if exc.decision.requires_approval else 400
+            raise HTTPException(status_code=status_code, detail=_build_policy_denial_detail(project_id, exc)) from exc
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "subagent returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"subagent dispatch failed: {exc}"},
+            ) from exc
+
+    @router.post("/{project_id}/run/auto")
+    def run_project_auto(project_id: str) -> dict[str, Any]:
+        try:
+            project = get_project_record(project_id)
+            planned = None
+            if project["current_stage"] == "intake":
+                planned = plan_project_record(project_id)
+            policy = _require_execution_policy(project_id)
+            flow = _run_execute_auto_flow(project_id, runner)
+            validated = validate_project_record(project_id)
+            reported = finalize_report_stage_record(project_id)
+            closed = close_project(project_id)
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "policy": policy,
+                "planned": planned,
+                **flow,
+                "validated": validated,
+                "reported": reported,
+                "closed": closed,
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except PolicyDeniedError as exc:
+            status_code = 403 if exc.decision.requires_approval else 400
+            raise HTTPException(status_code=status_code, detail=_build_policy_denial_detail(project_id, exc)) from exc
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "subagent returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"subagent dispatch failed: {exc}"},
+            ) from exc
+
+    @router.get("/{project_id}/execute/plan")
+    def get_execute_plan(project_id: str) -> dict[str, Any]:
+        try:
+            execution_plan = build_project_execution_script(project_id)
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "execution_plan": execution_plan,
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/policy-check")
+    def get_policy_check(project_id: str) -> dict[str, Any]:
+        try:
+            decision = evaluate_project_policy(project_id)
+            latest_approvals = list_project_approvals(project_id)
+            latest_approval = latest_approvals[-1] if latest_approvals else None
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "policy": decision.to_dict(),
+                "latest_approval": latest_approval,
+                "approval_request": (
+                    build_approval_request(project_id, decision)
+                    if decision.requires_approval
+                    else None
+                ),
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/approvals")
+    def get_project_approvals(project_id: str) -> dict[str, Any]:
+        try:
+            approvals = list_project_approvals(project_id)
+            return {"status": "ok", "project_id": project_id, "items": approvals}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/approvals/{approval_id}/approve")
+    def approve_project(project_id: str, approval_id: str, payload: ApprovalDecisionRequest) -> dict[str, Any]:
+        try:
+            approval = approve_project_approval(
+                project_id=project_id,
+                approval_id=approval_id,
+                approver_id=payload.approver_id,
+            )
+            return {"status": "ok", "project_id": project_id, "approval": approval}
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
         except ProjectServiceError as exc:
@@ -297,7 +630,9 @@ def create_playbook_router() -> APIRouter:
     return router
 
 
-def create_app() -> FastAPI:
+def create_app(
+    subagent_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="OldClaw Manager API",
         version="0.3.0-m3",
@@ -306,7 +641,7 @@ def create_app() -> FastAPI:
 
     app.include_router(create_health_router())
     app.include_router(create_runtime_router())
-    app.include_router(create_project_router())
+    app.include_router(create_project_router(subagent_runner=subagent_runner))
     app.include_router(create_asset_router())
     app.include_router(create_target_router())
     app.include_router(create_playbook_router())

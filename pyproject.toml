@@ -1,9 +1,7 @@
 [tool.poetry]
 name = "oldclaw"
 version = "0.1.0"
-definition = """
-A control‑plane for pi runtime.
-"""
+description = "A control-plane for pi runtime."
 authors = ["OldClaw Team <team@oldclaw.io>"]
 
 [tool.poetry.dependencies]
@@ -11,8 +9,9 @@ python = ">=3.11"
 uvicorn = "*"
 fastapi = "*"
 psycopg2-binary = "*"
-SQLAlchemy = "*"
-langgraph = "*"
+httpx = "*"
+requests = "*"
+pydantic = "*"
 
 [build-system]
 requires = ["poetry-core"]
