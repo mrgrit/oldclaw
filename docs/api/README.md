@@ -55,6 +55,10 @@ Request body:
 - `GET /projects/{project_id}/targets`
 - `POST /projects/{project_id}/playbooks/{playbook_id}`
 - `GET /projects/{project_id}/playbooks`
+- `POST /projects/{project_id}/schedules`
+- `GET /projects/{project_id}/schedules`
+- `POST /projects/{project_id}/watch-jobs`
+- `GET /projects/{project_id}/watch-jobs`
 - `POST /projects/{project_id}/dispatch/subagent`
 
 ### Registry-style Lookup
@@ -80,6 +84,7 @@ Request body:
 - sensitive playbooks, high-risk projects, and continuous mode are blocked before execution
 - blocked execution creates an approval request record
 - approved requests allow rerun through the same execution endpoints
+- schedules and watch jobs can now be created and listed from manager-api
 
 ## Not Yet Implemented
 

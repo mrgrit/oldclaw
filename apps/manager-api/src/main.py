@@ -51,6 +51,13 @@ from packages.project_service import (
     plan_project_record,
     validate_project_record,
 )
+from packages.scheduler_service import (
+    create_schedule_record,
+    create_watch_job_record,
+    get_project_schedules,
+    get_project_watch_jobs,
+    SchedulerServiceError,
+)
 
 
 class ProjectCreateRequest(BaseModel):
@@ -88,6 +95,20 @@ class ApprovalDecisionRequest(BaseModel):
 class ReviewHandoffRequest(BaseModel):
     reviewer_id: str = "master-service"
     comments: str | None = None
+
+
+class ScheduleCreateRequest(BaseModel):
+    schedule_type: str
+    cron_expr: str | None = None
+    next_run: str | None = None
+    enabled: bool = True
+    metadata: dict[str, Any] = {}
+
+
+class WatchJobCreateRequest(BaseModel):
+    watch_type: str
+    status: str = "running"
+    metadata: dict[str, Any] = {}
 
 
 def default_subagent_runner(payload: dict[str, Any]) -> dict[str, Any]:
@@ -696,6 +717,54 @@ def create_project_router(
     def get_project_playbooks_endpoint(project_id: str) -> dict[str, Any]:
         try:
             items = get_project_playbooks(project_id)
+            return {"status": "ok", "project_id": project_id, "items": items}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/schedules")
+    def create_project_schedule(project_id: str, payload: ScheduleCreateRequest) -> dict[str, Any]:
+        try:
+            schedule = create_schedule_record(
+                project_id=project_id,
+                schedule_type=payload.schedule_type,
+                cron_expr=payload.cron_expr,
+                next_run=payload.next_run,
+                enabled=payload.enabled,
+                metadata=payload.metadata,
+            )
+            return {"status": "ok", "project_id": project_id, "schedule": schedule}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except SchedulerServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/schedules")
+    def get_project_schedules_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            items = get_project_schedules(project_id)
+            return {"status": "ok", "project_id": project_id, "items": items}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/watch-jobs")
+    def create_project_watch_job(project_id: str, payload: WatchJobCreateRequest) -> dict[str, Any]:
+        try:
+            watch_job = create_watch_job_record(
+                project_id=project_id,
+                watch_type=payload.watch_type,
+                status=payload.status,
+                metadata=payload.metadata,
+            )
+            return {"status": "ok", "project_id": project_id, "watch_job": watch_job}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except SchedulerServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/watch-jobs")
+    def get_project_watch_jobs_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            items = get_project_watch_jobs(project_id)
             return {"status": "ok", "project_id": project_id, "items": items}
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc

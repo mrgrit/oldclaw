@@ -31,6 +31,58 @@ def _ensure_project(project_id: str, database_url: str | None = None) -> dict[st
     return get_project_record(project_id, database_url=database_url)
 
 
+def create_schedule_record(
+    project_id: str,
+    schedule_type: str,
+    cron_expr: str | None = None,
+    next_run: datetime | None = None,
+    enabled: bool = True,
+    metadata: dict[str, Any] | None = None,
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    _ensure_project(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO schedules (
+                    project_id, schedule_type, cron_expr, next_run, enabled, metadata, created_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s::jsonb, NOW()
+                )
+                RETURNING *
+                """,
+                (
+                    project_id,
+                    schedule_type,
+                    cron_expr,
+                    next_run,
+                    enabled,
+                    _json_dumps(metadata or {}),
+                ),
+            )
+            return dict(cur.fetchone())
+
+
+def get_project_schedules(
+    project_id: str,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    _ensure_project(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM schedules
+                WHERE project_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (project_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
 def load_due_schedules(
     database_url: str | None = None,
     as_of: datetime | None = None,
@@ -141,6 +193,54 @@ def load_active_watch_jobs(
                 WHERE status = 'running'
                 ORDER BY created_at ASC, id ASC
                 """
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def create_watch_job_record(
+    project_id: str,
+    watch_type: str,
+    status: str = "running",
+    metadata: dict[str, Any] | None = None,
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    _ensure_project(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO watch_jobs (
+                    project_id, watch_type, status, metadata, created_at
+                ) VALUES (
+                    %s, %s, %s, %s::jsonb, NOW()
+                )
+                RETURNING *
+                """,
+                (
+                    project_id,
+                    watch_type,
+                    status,
+                    _json_dumps(metadata or {}),
+                ),
+            )
+            return dict(cur.fetchone())
+
+
+def get_project_watch_jobs(
+    project_id: str,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    _ensure_project(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM watch_jobs
+                WHERE project_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (project_id,),
             )
             return [dict(row) for row in cur.fetchall()]
 

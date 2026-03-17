@@ -87,3 +87,4 @@ DATABASE_URL='postgresql://oldclaw:oldclaw@127.0.0.1:5432/oldclaw' PYTHONPATH=. 
 - manager execution paths are subject to policy gate checks before dispatch
 - denied executions persist approval requests and can be retried after approval
 - `make` targets exist in the repository, but some environments may not have the `make` binary installed
+- manager now exposes minimal schedule/watch control-plane APIs, while worker `run-once` endpoints consume those tables
