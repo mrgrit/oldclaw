@@ -49,6 +49,10 @@ def build_approval_request(project_id: str, decision: PolicyDecision) -> dict[st
     }
 
 
+def is_approval_override_active(approval: dict[str, Any] | None) -> bool:
+    return bool(approval and approval.get("status") == "approved")
+
+
 def create_approval_request_record(
     project_id: str,
     decision: PolicyDecision,
@@ -193,4 +197,4 @@ def has_project_approval(
         policy_name=policy_name,
         database_url=database_url,
     )
-    return bool(latest and latest.get("status") == "approved")
+    return is_approval_override_active(latest)

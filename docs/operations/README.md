@@ -43,6 +43,18 @@ python3 -m uvicorn --app-dir apps/master-service/src main:app --reload
 python3 -m uvicorn --app-dir apps/subagent-runtime/src main:app --reload
 ```
 
+### Scheduler Worker
+
+```bash
+python3 -m uvicorn --app-dir apps/scheduler-worker/src main:app --reload
+```
+
+### Watch Worker
+
+```bash
+python3 -m uvicorn --app-dir apps/watch-worker/src main:app --reload
+```
+
 ## Basic Verification
 
 Syntax-level verification:
@@ -54,25 +66,15 @@ python3 -m compileall apps packages tools
 DB-backed smoke examples:
 
 ```bash
-PYTHONPATH=. python3 tools/dev/project_service_smoke.py
-PYTHONPATH=. python3 tools/dev/m2_integrated_smoke.py
-PYTHONPATH=. python3 tools/dev/m3_integrated_smoke.py
-PYTHONPATH=. python3 tools/dev/project_close_smoke.py
-PYTHONPATH=. python3 tools/dev/subagent_run_script_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_execute_plan_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_execute_auto_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_execute_run_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_execute_failure_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_policy_gate_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_approval_flow_smoke.py
-PYTHONPATH=. python3 tools/dev/manager_run_auto_smoke.py
+python3 -m compileall apps packages tools tests
+DATABASE_URL='postgresql://oldclaw:oldclaw@127.0.0.1:5432/oldclaw' PYTHONPATH=. python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 ## Operational Reality
 
-- manager is the only service with meaningful business endpoints today
-- master and subagent are partial boundaries, not complete workers
-- scheduler and watch workers should be treated as placeholders
+- manager is still the orchestration center
+- master, subagent, scheduler, and watch now all have minimal executable boundaries
+- scheduler/watch are usable for `run-once` style verification, not full orchestration loops yet
 - no deployment automation or health orchestration is wired end-to-end yet
 
 ## Immediate Ops Risks
@@ -84,3 +86,4 @@ PYTHONPATH=. python3 tools/dev/manager_run_auto_smoke.py
 - manager auto execution paths derive skills/tools from `seed/playbooks` and `seed/skills`
 - manager execution paths are subject to policy gate checks before dispatch
 - denied executions persist approval requests and can be retried after approval
+- `make` targets exist in the repository, but some environments may not have the `make` binary installed

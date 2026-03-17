@@ -44,17 +44,17 @@ OldClaw의 기본 구조는 아래와 같다.
 - **SubAgent / Runtime**: 실제 환경에서 명령을 수행하는 실행 계층
 - **pi runtime**: 실제 작업 실행을 담당하는 런타임 엔진
 
-현재 구현은 전체 비전 중 **M2 완료 + M3 초기 진입 상태**에 해당한다. 즉, 장기 계획 전체가 완성된 것은 아니며, 현재는 다음을 중심으로 최소 동작 경로를 확보한 상태다.
+현재 구현은 전체 비전 중 **M2 완료 + M3 핵심 control-plane 상당 부분 구현 상태**에 해당한다. 즉, 장기 계획 전체가 완성된 것은 아니지만, manager/subagent/master 중심의 핵심 동작 경로는 이미 usable 수준으로 확보됐다.
 
 - DB‑backed project lifecycle
-- report finalize 최소 경로
-- minimal evidence 저장/조회 경로
-- close 최소 전이
-- asset 목록 조회
-- project‑asset 연결
-- project linked assets 조회
-- target 목록 조회 및 project‑target 연결
-- playbook 목록 조회 및 project‑playbook 연결
+- evidence 기반 validation / report / close
+- asset / target / playbook 연결
+- subagent script execution + evidence persistence
+- manager `execute/run`, `execute/auto`, `run/auto`
+- policy gate / approval 저장 / 승인 후 재실행
+- master review / replan / escalate
+- close 시 history + task memory persistence
+- scheduler / watch worker의 DB-backed minimal `run-once`
 
 ---
 
@@ -75,17 +75,15 @@ OldClaw의 개발은 마일스톤 기반으로 진행된다.
   - report/evidence 최소 경로
   - asset 최소 경로
 - **M3 이후**
-  - asset‑first 확장
   - target resolution
-  - playbook binding / execution
-  - approval / policy gate
-  - graph/runtime 고도화
-  - history / experience / retrieval
-  - continuous / watch / scheduler 경로
+  - playbook step branching / execution 고도화
+  - history / experience / retrieval 실제 활용
+  - continuous / watch / scheduler 고도화
+  - policy data-driven 일반화
 
 ---
 
-## 4. 현재 구현 상태 (M2 완료 / M3 초기 기준)
+## 4. 현재 구현 상태 (M2 완료 / M3 진행 중 기준)
 
 현재 기준으로 실제 확인된 것은 아래와 같다.
 
@@ -105,14 +103,20 @@ OldClaw의 개발은 마일스톤 기반으로 진행된다.
 - playbook 목록 조회
 - project에 playbook 연결
 - project linked playbooks 조회
-- 개발용 smoke test 다수 확보
+- `execute/run`, `execute/auto`, `run/auto`, `run/auto/review`
+- policy check, approval 생성/조회/승인
+- subagent 로컬 스크립트 실행 및 evidence 저장
+- master review / replan / escalate
+- history event / task memory 생성
+- scheduler-worker / watch-worker `run-once`
+- unit / contract / integration / e2e 테스트 확보
 
 ### 아직 남아 있는 것
 - target resolution pipeline
-- playbook registry의 실제 실행 연결
-- approval / policy gate
-- graph_runtime 고도화
-- history/experience 활용
+- playbook branching / step execution 고도화
+- policy rule 의 seed/data 일반화
+- retrieval / experience 실제 runtime 활용
+- continuous watch / scheduler orchestration 고도화
 - CI 확대 및 자동 검증 강화
 
 ---
@@ -142,23 +146,22 @@ OldClaw의 개발은 마일스톤 기반으로 진행된다.
 
 ## 6. 실행 및 검증
 
-대표 검증은 개발용 smoke를 통해 수행한다.
+대표 검증은 `unittest` 계층과 개발용 smoke를 함께 사용한다.
 
 ```bash
-python3 -m compileall apps packages tools
+python3 -m compileall apps packages tools tests
 ```
 
 ```bash
-PYTHONPATH=. python3 tools/dev/m2_integrated_smoke.py
+DATABASE_URL='postgresql://oldclaw:oldclaw@127.0.0.1:5432/oldclaw' PYTHONPATH=. python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 이 검증은 최소한 아래 범위를 확인해야 한다.
 
+- contract / integration / e2e 회귀
 - project 생성
 - plan / execute / validate / report / close
-- minimal evidence 생성 및 조회
-- asset 목록 조회
-- project‑asset 연결 및 조회
+- approval / review / history / scheduler / watch 최소 경로
 
 ---
 
@@ -185,4 +188,4 @@ PYTHONPATH=. python3 tools/dev/m2_integrated_smoke.py
 
 README는 현재 구현 상태를 반영하는 대표 문서다.
 없는 기능을 완성된 것처럼 적지 않는다.
-특히 playbook execution, approval/policy, graph 고도화, history/experience, continuous watch는 **계획 범위**이지 현재 완료 기능이 아니다.
+특히 retrieval/experience 실제 활용, advanced playbook branching, continuous watch orchestration은 아직 **계획 범위**이며 현재 구현은 최소 usable control-plane 수준이다.

@@ -60,7 +60,8 @@ This is not yet the full Master-Manager-SubAgent orchestration platform describe
 
 - health endpoint
 - runtime invoke endpoint
-- review / replan / escalate routes exist only as `501 Not Implemented`
+- review / replan / escalate routes implemented
+- writes `master_reviews` and derives `approved` / `needs_replan` / `rejected`
 
 ### SubAgent Runtime
 
@@ -68,21 +69,27 @@ This is not yet the full Master-Manager-SubAgent orchestration platform describe
 
 - health and capabilities endpoints
 - runtime invoke endpoint
-- `a2a/run_script` boundary exists but execution engine is not implemented
+- `a2a/run_script` executes local shell scripts and persists evidence
 
 ### Scheduler Worker
 
 `apps/scheduler-worker/src/main.py`
 
-- placeholder loop only
-- no schedule loading or job enqueue implementation
+- health endpoint
+- `run-once` endpoint
+- due schedule loading and `last_run` / `next_run` updates
+- per-run history event creation
 
 ### Watch Worker
 
 `apps/watch-worker/src/main.py`
 
-- placeholder loop only
-- no watch job processing or event generation implementation
+- health endpoint
+- `run-once` endpoint
+- running watch job loading
+- watch event creation
+- optional incident creation from job metadata
+- per-run history event creation
 
 ## Data Model Status
 
@@ -104,16 +111,23 @@ Only a subset is actively exercised by application code today:
 - `job_runs`
 - `evidence`
 - `reports`
+- `approvals`
+- `master_reviews`
+- `histories`
+- `task_memories`
+- `schedules`
+- `watch_jobs`
+- `watch_events`
+- `incidents`
 
 ## Known Gaps
 
-- no approval engine wiring
-- no policy enforcement
-- no actual playbook execution
+- no target resolution pipeline
+- no advanced playbook branching/execution graph
 - no target resolution pipeline
 - no distributed subagent execution
 - no history/retrieval usage in runtime decisions
-- no real scheduler/watch processing loop
+- no long-running scheduler/watch orchestration loop with control API
 - no integrated app factory / dependency injection layer
 
 ## Practical Development Baseline
@@ -122,5 +136,5 @@ When continuing development, treat the current system as:
 
 - a working Manager API prototype
 - a real PostgreSQL-backed lifecycle store
-- a partial M3 start, not a complete M3 implementation
+- an active M3 control-plane implementation, not a complete platform
 - documentation-in-progress with verification logs as historical context

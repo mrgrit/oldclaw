@@ -1,41 +1,56 @@
-# OldClaw Watch Worker
-# Monitors `watch_jobs` and processes events.
-
 import time
-from fastapi import FastAPI
+from typing import Any
 
-app = FastAPI(title="Watch Worker")
+from fastapi import APIRouter, FastAPI, HTTPException
 
-@app.get("/health")
-async def health_check():
-    return {"status": "watch ok"}
+from packages.project_service import ProjectNotFoundError
+from packages.scheduler_service import SchedulerServiceError, run_watch_once
 
-def load_watch_jobs():
-    """Load pending watch jobs from the database.
 
-    Returns a list of watch job dicts. Placeholder raises NotImplementedError in M0.
-    """
-    raise NotImplementedError("load_watch_jobs not implemented in M0 – DB integration pending")
+def create_health_router() -> APIRouter:
+    router = APIRouter(tags=["health"])
 
-def process_watch_job(job: dict):
-    """Process a single watch job and generate corresponding events.
-    Placeholder for M1 implementation.
-    """
-    raise NotImplementedError("process_watch_job not implemented in M0 – event handling pending")
+    @router.get("/health")
+    def health_check() -> dict[str, str]:
+        return {"status": "ok", "service": "watch-worker"}
 
-def run_loop(poll_interval: int = 30):
-    """Main watch loop – loads jobs and processes them.
-    """
+    return router
+
+
+def create_run_router() -> APIRouter:
+    router = APIRouter(tags=["watch"])
+
+    @router.post("/run-once")
+    def run_once() -> dict[str, Any]:
+        try:
+            result = run_watch_once()
+            return {"status": "ok", **result}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except SchedulerServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    return router
+
+
+def run_loop(poll_interval: int = 30) -> None:
     while True:
         try:
-            jobs = load_watch_jobs()
-            for j in jobs:
-                process_watch_job(j)
-        except NotImplementedError:
-            print("Watch placeholder executed – no DB integration.")
-            break
+            run_watch_once()
+        except Exception as exc:  # noqa: BLE001
+            print(f"watch loop error: {exc}")
         time.sleep(poll_interval)
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="OldClaw Watch Worker", version="0.2.0-m3")
+    app.include_router(create_health_router())
+    app.include_router(create_run_router())
+    return app
+
+
+app = create_app()
+
 
 if __name__ == "__main__":
     run_loop()
-

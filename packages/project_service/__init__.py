@@ -347,14 +347,87 @@ def create_validation_run_record(
             return dict(cur.fetchone())
 
 
+def get_validation_runs_for_project(
+    project_id: str,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    get_project_record(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM validation_runs
+                WHERE project_id = %s
+                ORDER BY executed_at ASC, id ASC
+                """,
+                (project_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def create_master_review_record(
+    project_id: str,
+    reviewer_agent_id: str,
+    status: str,
+    review_summary: str,
+    findings: dict[str, Any],
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    get_project_record(project_id, database_url=database_url)
+    review_id = f"mrv_{uuid.uuid4().hex[:12]}"
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO master_reviews (
+                    id, project_id, reviewer_agent_id, status, review_summary, findings, created_at
+                ) VALUES (
+                    %(id)s, %(project_id)s, %(reviewer_agent_id)s, %(status)s, %(review_summary)s,
+                    %(findings)s::jsonb, NOW()
+                )
+                RETURNING *
+                """,
+                {
+                    "id": review_id,
+                    "project_id": project_id,
+                    "reviewer_agent_id": reviewer_agent_id,
+                    "status": status,
+                    "review_summary": review_summary,
+                    "findings": json_dumps(findings),
+                },
+            )
+            return dict(cur.fetchone())
+
+
+def get_master_reviews_for_project(
+    project_id: str,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    get_project_record(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM master_reviews
+                WHERE project_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (project_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
 def json_dumps(value: dict[str, Any]) -> str:
     import json
 
     return json.dumps(value, ensure_ascii=True, sort_keys=True)
 
 
-def validate_project_record(project_id: str, database_url: str | None = None) -> dict[str, Any]:
-    evidence = get_evidence_for_project(project_id, database_url=database_url)
+def summarize_validation_evidence(
+    evidence: list[dict[str, Any]],
+) -> tuple[str, str, dict[str, int], str | None]:
     failing = [item for item in evidence if item.get("exit_code") not in (None, 0)]
     if not evidence:
         validation_status = "inconclusive"
@@ -367,16 +440,43 @@ def validate_project_record(project_id: str, database_url: str | None = None) ->
         validation_summary = f"Validation passed with {len(evidence)} evidence item(s)"
 
     latest_evidence_id = evidence[-1]["id"] if evidence else None
+    actual_result = {
+        "evidence_count": len(evidence),
+        "failing_evidence_count": len(failing),
+    }
+    return validation_status, validation_summary, actual_result, latest_evidence_id
+
+
+def summarize_project_report(
+    project_id: str,
+    playbook_name: str,
+    target_name: str,
+    asset_count: int,
+    evidence: list[dict[str, Any]],
+) -> str:
+    skill_fragment_count = len(
+        [item for item in evidence if item.get("evidence_type") == "report_fragment"]
+    )
+    return (
+        f"Project {project_id} completed at report stage; "
+        f"playbook={playbook_name}; target={target_name}; "
+        f"assets={asset_count}; evidence={len(evidence)}; "
+        f"skill_fragments={skill_fragment_count}"
+    )
+
+
+def validate_project_record(project_id: str, database_url: str | None = None) -> dict[str, Any]:
+    evidence = get_evidence_for_project(project_id, database_url=database_url)
+    validation_status, validation_summary, actual_result, latest_evidence_id = summarize_validation_evidence(
+        evidence
+    )
     validation_run = create_validation_run_record(
         project_id=project_id,
         validator_name="manager-api",
         validation_type="evidence_exit_code_check",
         status=validation_status,
         expected_result={"exit_code": 0},
-        actual_result={
-            "evidence_count": len(evidence),
-            "failing_evidence_count": len(failing),
-        },
+        actual_result=actual_result,
         evidence_id=latest_evidence_id,
         database_url=database_url,
     )
@@ -431,14 +531,12 @@ def build_project_report_summary(
     playbooks = get_project_playbooks(project_id, database_url=database_url)
     playbook_name = playbooks[0]["playbook"]["name"] if playbooks else "none"
     target_name = targets[0]["target"]["name"] if targets else "none"
-    skill_fragments = [
-        item for item in evidence if item.get("evidence_type") == "report_fragment"
-    ]
-    return (
-        f"Project {project['id']} completed at report stage; "
-        f"playbook={playbook_name}; target={target_name}; "
-        f"assets={len(assets)}; evidence={len(evidence)}; "
-        f"skill_fragments={len(skill_fragments)}"
+    return summarize_project_report(
+        project_id=project["id"],
+        playbook_name=playbook_name,
+        target_name=target_name,
+        asset_count=len(assets),
+        evidence=evidence,
     )
 
 

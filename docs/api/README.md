@@ -29,12 +29,14 @@ Request body:
 
 - `POST /projects`
 - `GET /projects/{project_id}`
+- `GET /projects/{project_id}/history`
 - `POST /projects/{project_id}/plan`
 - `POST /projects/{project_id}/execute`
 - `GET /projects/{project_id}/execute/plan`
 - `POST /projects/{project_id}/execute/run`
 - `POST /projects/{project_id}/execute/auto`
 - `POST /projects/{project_id}/run/auto`
+- `POST /projects/{project_id}/run/auto/review`
 - `GET /projects/{project_id}/policy-check`
 - `GET /projects/{project_id}/approvals`
 - `POST /projects/{project_id}/approvals/{approval_id}/approve`
@@ -71,6 +73,8 @@ Request body:
 - `execute/plan` previews the resolved target/playbook/skill/tool/script bundle
 - `execute/auto` builds a script from linked target/playbook seed metadata
 - `run/auto` performs `plan -> execute/auto -> validate -> report -> close` in one call
+- `run/auto/review` performs `plan -> execute/auto -> validate -> report -> close -> master review`
+- closing a project persists one raw history event and one structured task memory record
 - `validate` now records a `validation_runs` row based on evidence exit codes
 - validation status is `passed`, `failed`, or `inconclusive`
 - sensitive playbooks, high-risk projects, and continuous mode are blocked before execution
@@ -79,12 +83,10 @@ Request body:
 
 ## Not Yet Implemented
 
-- approval endpoints
-- policy endpoints
-- actual playbook execution endpoints
 - target resolution endpoints
-- scheduler or watch control endpoints
-- master review workflow integration
+- advanced playbook branching / distributed execution
+- retrieval / experience-backed runtime decisions
+- full scheduler / watch CRUD control plane
 
 ## Other Service APIs
 
@@ -94,9 +96,17 @@ Source: `apps/master-service/src/main.py`
 
 - `GET /health`
 - `POST /runtime/invoke`
-- `POST /projects/{project_id}/review` returns `501`
-- `POST /projects/{project_id}/replan` returns `501`
-- `POST /projects/{project_id}/escalate` returns `501`
+- `POST /projects/{project_id}/review`
+- `GET /projects/{project_id}/reviews`
+- `POST /projects/{project_id}/replan`
+- `POST /projects/{project_id}/escalate`
+
+Current behavior:
+
+- review stores a `master_reviews` row
+- approved projects return `approved`
+- approval-pending or validation-missing projects return `needs_replan`
+- failed validation projects return `rejected`
 
 ### SubAgent Runtime
 
@@ -105,4 +115,36 @@ Source: `apps/subagent-runtime/src/main.py`
 - `GET /health`
 - `GET /capabilities`
 - `POST /runtime/invoke`
-- `POST /a2a/run_script` returns `501`
+- `POST /a2a/run_script`
+
+Current behavior:
+
+- executes local shell script via `/bin/bash -lc`
+- persists subagent evidence and updates `job_runs`
+
+### Scheduler Worker
+
+Source: `apps/scheduler-worker/src/main.py`
+
+- `GET /health`
+- `POST /run-once`
+
+Current behavior:
+
+- loads enabled schedules whose `next_run` is due
+- updates `last_run` / `next_run`
+- records one `schedule_triggered` history event per processed schedule
+
+### Watch Worker
+
+Source: `apps/watch-worker/src/main.py`
+
+- `GET /health`
+- `POST /run-once`
+
+Current behavior:
+
+- loads `watch_jobs` with `status='running'`
+- records one `watch_events` row per processed job
+- optionally creates an `incidents` row when metadata requests it
+- records one `watch_job_processed` history event per processed job

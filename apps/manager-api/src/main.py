@@ -12,6 +12,13 @@ from packages.approval_engine import (
     has_project_approval,
     list_project_approvals,
 )
+from packages.history_service import (
+    HistoryProjectNotFoundError,
+    HistoryServiceError,
+    get_project_history,
+    get_project_task_memories,
+    persist_project_closure_memory,
+)
 from packages.pi_adapter.runtime import PiRuntimeClient, PiRuntimeConfig
 from packages.policy_engine import (
     PolicyDeniedError,
@@ -78,6 +85,11 @@ class ApprovalDecisionRequest(BaseModel):
     approver_id: str = "human-reviewer"
 
 
+class ReviewHandoffRequest(BaseModel):
+    reviewer_id: str = "master-service"
+    comments: str | None = None
+
+
 def default_subagent_runner(payload: dict[str, Any]) -> dict[str, Any]:
     subagent_url = os.getenv(
         "OLDCLAW_SUBAGENT_URL",
@@ -85,6 +97,17 @@ def default_subagent_runner(payload: dict[str, Any]) -> dict[str, Any]:
     ).rstrip("/")
     with httpx.Client(timeout=max(int(payload.get("timeout_s", 120)) + 5, 10)) as client:
         response = client.post(f"{subagent_url}/a2a/run_script", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+def default_master_runner(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    master_url = os.getenv(
+        "OLDCLAW_MASTER_URL",
+        "http://127.0.0.1:8011",
+    ).rstrip("/")
+    with httpx.Client(timeout=30) as client:
+        response = client.post(f"{master_url}/projects/{project_id}/review", json=payload)
         response.raise_for_status()
         return response.json()
 
@@ -190,9 +213,11 @@ def create_runtime_router() -> APIRouter:
 
 def create_project_router(
     subagent_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    master_runner: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects", tags=["projects"])
     runner = subagent_runner or default_subagent_runner
+    review_runner = master_runner or default_master_runner
 
     @router.post("")
     def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
@@ -226,6 +251,22 @@ def create_project_router(
             return {"status": "ok", "project": project}
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/history")
+    def get_project_history_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            history = get_project_history(project_id)
+            task_memories = get_project_task_memories(project_id)
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "history": history,
+                "task_memories": task_memories,
+            }
+        except HistoryProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except HistoryServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/execute")
     def execute_project(project_id: str) -> dict[str, Any]:
@@ -374,6 +415,7 @@ def create_project_router(
             validated = validate_project_record(project_id)
             reported = finalize_report_stage_record(project_id)
             closed = close_project(project_id)
+            memory = persist_project_closure_memory(project_id)
             return {
                 "status": "ok",
                 "project_id": project_id,
@@ -383,6 +425,7 @@ def create_project_router(
                 "validated": validated,
                 "reported": reported,
                 "closed": closed,
+                "memory": memory,
             }
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
@@ -406,6 +449,63 @@ def create_project_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={"message": f"subagent dispatch failed: {exc}"},
+            ) from exc
+
+    @router.post("/{project_id}/run/auto/review")
+    def run_project_auto_with_review(project_id: str, payload: ReviewHandoffRequest) -> dict[str, Any]:
+        try:
+            project = get_project_record(project_id)
+            planned = None
+            if project["current_stage"] == "intake":
+                planned = plan_project_record(project_id)
+            policy = _require_execution_policy(project_id)
+            flow = _run_execute_auto_flow(project_id, runner)
+            validated = validate_project_record(project_id)
+            reported = finalize_report_stage_record(project_id)
+            closed = close_project(project_id)
+            memory = persist_project_closure_memory(project_id)
+            review = review_runner(
+                project_id,
+                {
+                    "project_id": project_id,
+                    "reviewer_id": payload.reviewer_id,
+                    "comments": payload.comments,
+                },
+            )
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "policy": policy,
+                "planned": planned,
+                **flow,
+                "validated": validated,
+                "reported": reported,
+                "closed": closed,
+                "memory": memory,
+                "master_review": review,
+            }
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except PolicyDeniedError as exc:
+            status_code = 403 if exc.decision.requires_approval else 400
+            raise HTTPException(status_code=status_code, detail=_build_policy_denial_detail(project_id, exc)) from exc
+        except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except ProjectServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "handoff service returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"handoff dispatch failed: {exc}"},
             ) from exc
 
     @router.get("/{project_id}/execute/plan")
@@ -522,10 +622,13 @@ def create_project_router(
     def close_project_endpoint(project_id: str) -> dict[str, Any]:
         try:
             project = close_project(project_id)
-            return {"status": "ok", "project": project}
+            memory = persist_project_closure_memory(project_id)
+            return {"status": "ok", "project": project, "memory": memory}
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
         except ProjectStageError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+        except HistoryServiceError as exc:
             raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/{project_id}/assets/{asset_id}")
@@ -632,6 +735,7 @@ def create_playbook_router() -> APIRouter:
 
 def create_app(
     subagent_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    master_runner: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="OldClaw Manager API",
@@ -641,7 +745,12 @@ def create_app(
 
     app.include_router(create_health_router())
     app.include_router(create_runtime_router())
-    app.include_router(create_project_router(subagent_runner=subagent_runner))
+    app.include_router(
+        create_project_router(
+            subagent_runner=subagent_runner,
+            master_runner=master_runner,
+        )
+    )
     app.include_router(create_asset_router())
     app.include_router(create_target_router())
     app.include_router(create_playbook_router())
