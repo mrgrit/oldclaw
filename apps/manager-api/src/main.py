@@ -59,6 +59,7 @@ from packages.scheduler_service import (
     get_project_watch_events,
     get_project_watch_jobs,
     SchedulerServiceError,
+    update_project_incident_status,
 )
 
 
@@ -812,6 +813,26 @@ def create_project_router(
             return {"status": "ok", "project_id": project_id, "items": items}
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/incidents/{incident_id}/acknowledge")
+    def acknowledge_project_incident(project_id: str, incident_id: str) -> dict[str, Any]:
+        try:
+            incident = update_project_incident_status(project_id, incident_id, "acknowledged")
+            return {"status": "ok", "project_id": project_id, "incident": incident}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except SchedulerServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    @router.post("/{project_id}/incidents/{incident_id}/close")
+    def close_project_incident(project_id: str, incident_id: str) -> dict[str, Any]:
+        try:
+            incident = update_project_incident_status(project_id, incident_id, "closed")
+            return {"status": "ok", "project_id": project_id, "incident": incident}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+        except SchedulerServiceError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
     @router.post("/scheduler/run-once")
     def trigger_scheduler_run_once() -> dict[str, Any]:

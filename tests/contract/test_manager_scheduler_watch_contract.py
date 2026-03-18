@@ -63,6 +63,26 @@ class ManagerSchedulerWatchContractTest(unittest.TestCase):
         self.assertEqual(set(payload.keys()), {"status", "project_id", "items"})
         self.assertEqual(set(payload["items"][0].keys()), {"id", "severity", "status"})
 
+    def test_acknowledge_incident_response_shape(self):
+        incident = {"id": "inc_1", "severity": "high", "status": "acknowledged"}
+        with patch.object(manager_module, "update_project_incident_status", return_value=incident):
+            response = self.client.post("/projects/prj_1/incidents/inc_1/acknowledge")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(set(payload.keys()), {"status", "project_id", "incident"})
+        self.assertEqual(set(payload["incident"].keys()), {"id", "severity", "status"})
+
+    def test_close_incident_response_shape(self):
+        incident = {"id": "inc_1", "severity": "high", "status": "closed"}
+        with patch.object(manager_module, "update_project_incident_status", return_value=incident):
+            response = self.client.post("/projects/prj_1/incidents/inc_1/close")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(set(payload.keys()), {"status", "project_id", "incident"})
+        self.assertEqual(set(payload["incident"].keys()), {"id", "severity", "status"})
+
 
 if __name__ == "__main__":
     unittest.main()

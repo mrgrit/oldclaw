@@ -61,6 +61,8 @@ Request body:
 - `GET /projects/{project_id}/watch-jobs`
 - `GET /projects/{project_id}/watch-events`
 - `GET /projects/{project_id}/incidents`
+- `POST /projects/{project_id}/incidents/{incident_id}/acknowledge`
+- `POST /projects/{project_id}/incidents/{incident_id}/close`
 - `POST /projects/scheduler/run-once`
 - `POST /projects/watch/run-once`
 - `POST /projects/{project_id}/dispatch/subagent`
@@ -91,6 +93,7 @@ Request body:
 - schedules and watch jobs can now be created and listed from manager-api
 - manager can trigger scheduler/watch worker `run-once` via HTTP dispatch
 - watch events and incidents can be queried per project after worker execution
+- incidents can be acknowledged or closed through manager-api
 
 ## Not Yet Implemented
 

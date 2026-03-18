@@ -284,6 +284,41 @@ def get_project_incidents(
             return [dict(row) for row in cur.fetchall()]
 
 
+def update_project_incident_status(
+    project_id: str,
+    incident_id: str,
+    status: str,
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    _ensure_project(project_id, database_url=database_url)
+    if status not in {"acknowledged", "closed"}:
+        raise SchedulerServiceError(f"Unsupported incident status: {status}")
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE incidents
+                SET status = %s,
+                    metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
+                WHERE id = %s
+                  AND project_id = %s
+                RETURNING *
+                """,
+                (
+                    status,
+                    _json_dumps({"last_status_update": status}),
+                    incident_id,
+                    project_id,
+                ),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ProjectNotFoundError(
+                    f"Incident not found for project {project_id}: {incident_id}"
+                )
+            return dict(row)
+
+
 def process_watch_job(
     job: dict[str, Any],
     database_url: str | None = None,

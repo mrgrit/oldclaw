@@ -86,6 +86,43 @@ class ManagerSchedulerWatchIntegrationTest(ManagerIntegrationTestCase):
         self.assertGreaterEqual(len(incidents), 1)
         self.assertEqual(incidents[-1]["status"], "open")
 
+    def test_acknowledge_and_close_incident(self):
+        project_id = self.create_project(
+            name=f"project-watch-incident-{uuid4().hex[:8]}",
+            request_text="manager incident status api check",
+        )
+
+        self.client.post(
+            f"/projects/{project_id}/watch-jobs",
+            json={
+                "watch_type": "heartbeat",
+                "metadata": {
+                    "event_type": "watch_alert",
+                    "create_incident": True,
+                    "severity": "high",
+                    "summary": "Incident status transition",
+                },
+            },
+        ).raise_for_status()
+
+        self.client.post("/projects/watch/run-once").raise_for_status()
+
+        incidents_response = self.client.get(f"/projects/{project_id}/incidents")
+        incidents_response.raise_for_status()
+        incident_id = str(incidents_response.json()["items"][-1]["id"])
+
+        ack_response = self.client.post(
+            f"/projects/{project_id}/incidents/{incident_id}/acknowledge"
+        )
+        ack_response.raise_for_status()
+        self.assertEqual(ack_response.json()["incident"]["status"], "acknowledged")
+
+        close_response = self.client.post(
+            f"/projects/{project_id}/incidents/{incident_id}/close"
+        )
+        close_response.raise_for_status()
+        self.assertEqual(close_response.json()["incident"]["status"], "closed")
+
 
 if __name__ == "__main__":
     unittest.main()
