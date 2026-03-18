@@ -111,6 +111,28 @@ class WatchJobCreateRequest(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+def default_scheduler_runner() -> dict[str, Any]:
+    scheduler_url = os.getenv(
+        "OLDCLAW_SCHEDULER_URL",
+        "http://127.0.0.1:8013",
+    ).rstrip("/")
+    with httpx.Client(timeout=30) as client:
+        response = client.post(f"{scheduler_url}/run-once")
+        response.raise_for_status()
+        return response.json()
+
+
+def default_watch_runner() -> dict[str, Any]:
+    watch_url = os.getenv(
+        "OLDCLAW_WATCH_URL",
+        "http://127.0.0.1:8014",
+    ).rstrip("/")
+    with httpx.Client(timeout=30) as client:
+        response = client.post(f"{watch_url}/run-once")
+        response.raise_for_status()
+        return response.json()
+
+
 def default_subagent_runner(payload: dict[str, Any]) -> dict[str, Any]:
     subagent_url = os.getenv(
         "OLDCLAW_SUBAGENT_URL",
@@ -235,10 +257,14 @@ def create_runtime_router() -> APIRouter:
 def create_project_router(
     subagent_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     master_runner: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+    scheduler_runner: Callable[[], dict[str, Any]] | None = None,
+    watch_runner: Callable[[], dict[str, Any]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects", tags=["projects"])
     runner = subagent_runner or default_subagent_runner
     review_runner = master_runner or default_master_runner
+    scheduler_once_runner = scheduler_runner or default_scheduler_runner
+    watch_once_runner = watch_runner or default_watch_runner
 
     @router.post("")
     def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
@@ -769,6 +795,46 @@ def create_project_router(
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
 
+    @router.post("/scheduler/run-once")
+    def trigger_scheduler_run_once() -> dict[str, Any]:
+        try:
+            result = scheduler_once_runner()
+            return {"status": "ok", "result": result}
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "scheduler worker returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"scheduler dispatch failed: {exc}"},
+            ) from exc
+
+    @router.post("/watch/run-once")
+    def trigger_watch_run_once() -> dict[str, Any]:
+        try:
+            result = watch_once_runner()
+            return {"status": "ok", "result": result}
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "watch worker returned error response",
+                    "status_code": exc.response.status_code,
+                    "body": exc.response.text,
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": f"watch dispatch failed: {exc}"},
+            ) from exc
+
     return router
 
 
@@ -805,6 +871,8 @@ def create_playbook_router() -> APIRouter:
 def create_app(
     subagent_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     master_runner: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+    scheduler_runner: Callable[[], dict[str, Any]] | None = None,
+    watch_runner: Callable[[], dict[str, Any]] | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="OldClaw Manager API",
@@ -818,6 +886,8 @@ def create_app(
         create_project_router(
             subagent_runner=subagent_runner,
             master_runner=master_runner,
+            scheduler_runner=scheduler_runner,
+            watch_runner=watch_runner,
         )
     )
     app.include_router(create_asset_router())

@@ -59,6 +59,8 @@ Request body:
 - `GET /projects/{project_id}/schedules`
 - `POST /projects/{project_id}/watch-jobs`
 - `GET /projects/{project_id}/watch-jobs`
+- `POST /projects/scheduler/run-once`
+- `POST /projects/watch/run-once`
 - `POST /projects/{project_id}/dispatch/subagent`
 
 ### Registry-style Lookup
@@ -85,6 +87,7 @@ Request body:
 - blocked execution creates an approval request record
 - approved requests allow rerun through the same execution endpoints
 - schedules and watch jobs can now be created and listed from manager-api
+- manager can trigger scheduler/watch worker `run-once` via HTTP dispatch
 
 ## Not Yet Implemented
 

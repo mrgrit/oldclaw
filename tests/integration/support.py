@@ -54,10 +54,33 @@ def build_manager_client() -> TestClient:
         f"oldclaw_manager_test_{uuid4().hex}",
         "apps/manager-api/src/main.py",
     )
+    scheduler_module = load_module(
+        f"oldclaw_scheduler_test_{uuid4().hex}",
+        "apps/scheduler-worker/src/main.py",
+    )
+    watch_module = load_module(
+        f"oldclaw_watch_test_{uuid4().hex}",
+        "apps/watch-worker/src/main.py",
+    )
+    scheduler_client = TestClient(scheduler_module.create_app())
+    watch_client = TestClient(watch_module.create_app())
+
+    def scheduler_runner():
+        response = scheduler_client.post("/run-once")
+        response.raise_for_status()
+        return response.json()
+
+    def watch_runner():
+        response = watch_client.post("/run-once")
+        response.raise_for_status()
+        return response.json()
+
     return TestClient(
         manager_module.create_app(
             subagent_runner=build_subagent_runner(),
             master_runner=build_master_runner(),
+            scheduler_runner=scheduler_runner,
+            watch_runner=watch_runner,
         )
     )
 
