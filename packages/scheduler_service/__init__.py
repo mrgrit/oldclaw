@@ -245,6 +245,45 @@ def get_project_watch_jobs(
             return [dict(row) for row in cur.fetchall()]
 
 
+def get_project_watch_events(
+    project_id: str,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    _ensure_project(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT we.*
+                FROM watch_events we
+                JOIN watch_jobs wj ON we.watch_job_id = wj.id
+                WHERE wj.project_id = %s
+                ORDER BY we.created_at ASC, we.id ASC
+                """,
+                (project_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def get_project_incidents(
+    project_id: str,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    _ensure_project(project_id, database_url=database_url)
+    with get_connection(database_url) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM incidents
+                WHERE project_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (project_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
 def process_watch_job(
     job: dict[str, Any],
     database_url: str | None = None,

@@ -59,6 +59,8 @@ Request body:
 - `GET /projects/{project_id}/schedules`
 - `POST /projects/{project_id}/watch-jobs`
 - `GET /projects/{project_id}/watch-jobs`
+- `GET /projects/{project_id}/watch-events`
+- `GET /projects/{project_id}/incidents`
 - `POST /projects/scheduler/run-once`
 - `POST /projects/watch/run-once`
 - `POST /projects/{project_id}/dispatch/subagent`
@@ -88,6 +90,7 @@ Request body:
 - approved requests allow rerun through the same execution endpoints
 - schedules and watch jobs can now be created and listed from manager-api
 - manager can trigger scheduler/watch worker `run-once` via HTTP dispatch
+- watch events and incidents can be queried per project after worker execution
 
 ## Not Yet Implemented
 

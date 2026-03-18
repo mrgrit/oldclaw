@@ -43,6 +43,26 @@ class ManagerSchedulerWatchContractTest(unittest.TestCase):
         self.assertEqual(set(payload.keys()), {"status", "project_id", "watch_job"})
         self.assertEqual(set(payload["watch_job"].keys()), {"id", "project_id", "watch_type"})
 
+    def test_list_watch_events_response_shape(self):
+        items = [{"id": "evt_1", "event_type": "watch_alert", "watch_job_id": "wj_1"}]
+        with patch.object(manager_module, "get_project_watch_events", return_value=items):
+            response = self.client.get("/projects/prj_1/watch-events")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(set(payload.keys()), {"status", "project_id", "items"})
+        self.assertEqual(set(payload["items"][0].keys()), {"id", "event_type", "watch_job_id"})
+
+    def test_list_incidents_response_shape(self):
+        items = [{"id": "inc_1", "severity": "high", "status": "open"}]
+        with patch.object(manager_module, "get_project_incidents", return_value=items):
+            response = self.client.get("/projects/prj_1/incidents")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(set(payload.keys()), {"status", "project_id", "items"})
+        self.assertEqual(set(payload["items"][0].keys()), {"id", "severity", "status"})
+
 
 if __name__ == "__main__":
     unittest.main()

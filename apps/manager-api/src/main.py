@@ -54,7 +54,9 @@ from packages.project_service import (
 from packages.scheduler_service import (
     create_schedule_record,
     create_watch_job_record,
+    get_project_incidents,
     get_project_schedules,
+    get_project_watch_events,
     get_project_watch_jobs,
     SchedulerServiceError,
 )
@@ -791,6 +793,22 @@ def create_project_router(
     def get_project_watch_jobs_endpoint(project_id: str) -> dict[str, Any]:
         try:
             items = get_project_watch_jobs(project_id)
+            return {"status": "ok", "project_id": project_id, "items": items}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/watch-events")
+    def get_project_watch_events_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            items = get_project_watch_events(project_id)
+            return {"status": "ok", "project_id": project_id, "items": items}
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc
+
+    @router.get("/{project_id}/incidents")
+    def get_project_incidents_endpoint(project_id: str) -> dict[str, Any]:
+        try:
+            items = get_project_incidents(project_id)
             return {"status": "ok", "project_id": project_id, "items": items}
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail={"message": str(exc)}) from exc

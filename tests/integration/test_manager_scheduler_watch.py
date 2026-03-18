@@ -53,6 +53,39 @@ class ManagerSchedulerWatchIntegrationTest(ManagerIntegrationTestCase):
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]["watch_type"], "heartbeat")
 
+    def test_list_watch_events_and_incidents_after_worker_run(self):
+        project_id = self.create_project(
+            name=f"project-watch-observe-{uuid4().hex[:8]}",
+            request_text="manager watch observation api check",
+        )
+
+        self.client.post(
+            f"/projects/{project_id}/watch-jobs",
+            json={
+                "watch_type": "heartbeat",
+                "metadata": {
+                    "event_type": "watch_alert",
+                    "create_incident": True,
+                    "severity": "high",
+                    "summary": "Observation incident",
+                },
+            },
+        ).raise_for_status()
+
+        self.client.post("/projects/watch/run-once").raise_for_status()
+
+        events_response = self.client.get(f"/projects/{project_id}/watch-events")
+        events_response.raise_for_status()
+        events = events_response.json()["items"]
+
+        incidents_response = self.client.get(f"/projects/{project_id}/incidents")
+        incidents_response.raise_for_status()
+        incidents = incidents_response.json()["items"]
+
+        self.assertGreaterEqual(len(events), 1)
+        self.assertGreaterEqual(len(incidents), 1)
+        self.assertEqual(incidents[-1]["status"], "open")
+
 
 if __name__ == "__main__":
     unittest.main()
